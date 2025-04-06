@@ -1,13 +1,12 @@
 {
   "name": "scraper-creusot",
   "version": "1.0.0",
-  "type": "commonjs",
   "main": "scrape-creusot.js",
+  "type": "commonjs",
   "scripts": {
-    "postinstall": "node install-chrome.js",
     "start": "node scrape-creusot.js"
   },
   "dependencies": {
-    "puppeteer": "^21.11.0"
+    "puppeteer": "^21.3.8"
   }
 }
