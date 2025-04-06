@@ -1,3 +1,4 @@
+// Déclenchement test GitHub Actions
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 
