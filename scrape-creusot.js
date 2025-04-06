@@ -1,6 +1,6 @@
-// Déclenchement test GitHub Actions
 const puppeteer = require('puppeteer');
 const fs = require('fs');
+const path = require('path');
 
 async function scrapeCreusotInfos() {
   const browser = await puppeteer.launch({
@@ -41,11 +41,14 @@ async function scrapeCreusotInfos() {
     return results;
   });
 
-  await fs.promises.writeFile('creusot.json', JSON.stringify(articles, null, 2));
+  // 📝 Écriture dans data/articles.json
+  const outputPath = path.join(__dirname, 'data', 'articles.json');
+  await fs.promises.writeFile(outputPath, JSON.stringify(articles, null, 2));
+
+  console.log(`✅ ${articles.length} article(s) enregistré(s) dans data/articles.json`);
   await browser.close();
 }
 
 scrapeCreusotInfos().then(() => {
   console.log("✅ Scraping terminé.");
 });
-// 🟢 Déclenchement test
