@@ -48,3 +48,4 @@ async function scrapeCreusotInfos() {
 scrapeCreusotInfos().then(() => {
   console.log("✅ Scraping terminé.");
 });
+// 🟢 Déclenchement test
