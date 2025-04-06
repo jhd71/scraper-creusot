@@ -1,8 +1,7 @@
-// install-chrome.js
 const puppeteer = require('puppeteer');
 
 (async () => {
-  console.log('⬇️ Téléchargement de Chromium...');
-  await puppeteer.launch().then(browser => browser.close());
-  console.log('✅ Chromium téléchargé.');
+  console.log('⬇️ Téléchargement automatique de Chromium via Puppeteer...');
+  const browser = await puppeteer.launch({ headless: 'new' });
+  await browser.close();
 })();
