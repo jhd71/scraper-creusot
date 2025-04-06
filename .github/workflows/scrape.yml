@@ -12,8 +12,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Chromium
-        run: npx puppeteer browsers install chrome
+      - name: Force Puppeteer to download Chromium
+        run: node install-chrome.js
 
       - name: Run scraper
         run: node scrape-creusot.js
