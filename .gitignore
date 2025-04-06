@@ -1,0 +1,8 @@
+# Ignore les fichiers temporaires / systèmes
+node_modules/
+.DS_Store
+.env
+*.log
+
+# Si tu veux éviter de commit trop souvent les résultats
+data/articles.json
