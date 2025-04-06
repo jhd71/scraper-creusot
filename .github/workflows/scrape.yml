@@ -1,0 +1,33 @@
+name: Scraper Creusot Infos
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # toutes les 6 heures
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v3
+
+      - name: Installation Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Exécuter le scraper
+        run: node scrape-creusot.js
+
+      - name: Commit JSON mis à jour
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add creusot.json
+          git commit -m "📰 MAJ des actualités Creusot Infos" || echo "Pas de changements"
+          git push
