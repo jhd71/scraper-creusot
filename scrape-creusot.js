@@ -1,6 +1,5 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
-const path = require('path');
 
 async function scrapeCreusotInfos() {
   const browser = await puppeteer.launch({
@@ -41,11 +40,7 @@ async function scrapeCreusotInfos() {
     return results;
   });
 
-  // 📝 Écriture dans data/articles.json
-  const outputPath = path.join(__dirname, 'data', 'articles.json');
-  await fs.promises.writeFile(outputPath, JSON.stringify(articles, null, 2));
-
-  console.log(`✅ ${articles.length} article(s) enregistré(s) dans data/articles.json`);
+  await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
   await browser.close();
 }
 
