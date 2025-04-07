@@ -6,7 +6,7 @@
 Ce projet utilise **Puppeteer** pour scraper automatiquement les dernières actualités publiées dans la section "Faits Divers" du site [Creusot Infos](https://www.creusot-infos.com/news/faits-divers/).
 
 Les résultats sont enregistrés sous forme de fichier JSON dans :  
-📁 `data/articles.json`
+📁 [`data/articles.json`](https://github.com/jhd71/scraper-creusot/blob/main/data/articles.json)
 
 ---
 
@@ -42,4 +42,4 @@ Les résultats sont enregistrés sous forme de fichier JSON dans :
 
 ---
 
-> 📬 Contact : [infos71@free.fr](mailto:infos71@free.fr)
+> 📬 Contact : [contact@actuetmedia.fr](mailto:contact@actuetmedia.fr)
