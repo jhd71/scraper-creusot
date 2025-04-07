@@ -1,2 +1,3 @@
 // Trigger GitHub Actions
 // 🟢 Trigger test GitHub Actions
+// 🔁 Déclenchement correct
