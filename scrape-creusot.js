@@ -7,153 +7,321 @@ async function scrapeCreusotInfos() {
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
-  const page = await browser.newPage();
-  await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
-    waitUntil: 'domcontentloaded',
-    timeout: 20000
-  });
+  try {
+    const page = await browser.newPage();
+    
+    // Configuration pour simuler un utilisateur réel
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    console.log("Accès à la page des faits divers...");
+    await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
+      waitUntil: 'networkidle2',
+      timeout: 30000
+    });
 
-  await page.waitForSelector('.columns_content', { timeout: 10000 });
+    // Attendre que la page soit chargée
+    await page.waitForSelector('body', { timeout: 15000 });
+    console.log("Page chargée, recherche des articles...");
 
-  const articles = await page.evaluate(() => {
-    // Sélecteur plus précis pour les articles sur la page Faits-divers
-    const articleElements = Array.from(document.querySelectorAll('.columns_content .listingArticle'));
-    const results = [];
+    // Capture d'écran pour le débogage (optionnel - utile pour voir ce que Puppeteer voit)
+    await page.screenshot({ path: 'debug-screenshot.png' });
 
-    for (const article of articleElements) {
-      const link = article.querySelector('.title a');
-      const title = link?.textContent?.trim();
-      const href = link?.href;
+    const articles = await page.evaluate(() => {
+      // Essayons plusieurs sélecteurs pour trouver les articles
+      const selectors = [
+        '.listingArticle', 
+        '.article-item',
+        '.news-item',
+        '.article',
+        'article'
+      ];
       
-      // Obtention de l'URL de l'image - soit depuis l'élément img, soit depuis le style background-image
-      let image = article.querySelector('.image img')?.src;
-      if (!image) {
-        const imageDiv = article.querySelector('.image');
-        if (imageDiv) {
-          const bgStyle = window.getComputedStyle(imageDiv).backgroundImage;
-          if (bgStyle && bgStyle !== 'none') {
-            image = bgStyle.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
-          }
+      let articleElements = [];
+      
+      // Essayer chaque sélecteur jusqu'à en trouver un qui fonctionne
+      for (const selector of selectors) {
+        const elements = Array.from(document.querySelectorAll(selector));
+        if (elements.length > 0) {
+          articleElements = elements;
+          console.log(`Trouvé ${elements.length} articles avec le sélecteur ${selector}`);
+          break;
         }
       }
       
-      // Extraction de la date de publication
-      const dateElement = article.querySelector('.date');
-      let publishDate = null;
-      
-      if (dateElement) {
-        publishDate = dateElement.textContent.trim();
-      } else {
-        // Si pas de date trouvée, on utilisera la date après visite de la page de l'article
-        publishDate = null;
-      }
-
-      if (title && href && title.length > 10) {
-        results.push({
-          title,
-          link: href,
-          image: image || '',
-          rawDate: publishDate,
-          date: null, // Sera complété plus tard
-          source: 'Creusot Infos'
-        });
-      }
-
-      if (results.length >= 5) break;
-    }
-
-    return results;
-  });
-
-  // Pour chaque article, on visite sa page pour récupérer la date exacte
-  for (let i = 0; i < articles.length; i++) {
-    try {
-      console.log(`Visite de l'article: ${articles[i].link}`);
-      await page.goto(articles[i].link, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      
-      const articleData = await page.evaluate(() => {
-        // Chercher la date dans la page de l'article
-        const dateEl = document.querySelector('.article_infos .date');
-        const imageEl = document.querySelector('.article_image img') || document.querySelector('.article_image');
+      // Si aucun sélecteur ne fonctionne, essayons une approche plus générique
+      if (articleElements.length === 0) {
+        // Recherche d'éléments contenant des liens et du texte pouvant être des articles
+        const allLinks = Array.from(document.querySelectorAll('a[href*="/news/"]'));
+        const potentialArticles = new Set();
         
-        let imageUrl = '';
-        if (imageEl) {
-          if (imageEl.tagName === 'IMG') {
-            imageUrl = imageEl.src;
-          } else {
-            const bgStyle = window.getComputedStyle(imageEl).backgroundImage;
-            if (bgStyle && bgStyle !== 'none') {
-              imageUrl = bgStyle.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
+        for (const link of allLinks) {
+          // Remonter pour trouver un conteneur potentiel d'article
+          let parent = link.parentElement;
+          for (let i = 0; i < 5 && parent; i++) {
+            if (parent.querySelectorAll('a[href*="/news/"]').length === 1) {
+              potentialArticles.add(parent);
+              break;
+            }
+            parent = parent.parentElement;
+          }
+        }
+        
+        articleElements = Array.from(potentialArticles);
+        console.log(`Approche alternative: trouvé ${articleElements.length} articles potentiels`);
+      }
+      
+      // Extraction des informations pour chaque article trouvé
+      const results = [];
+      
+      for (const article of articleElements) {
+        // Recherche du titre et du lien (on essaie plusieurs approches)
+        let title = null;
+        let href = null;
+        let titleElement = article.querySelector('h2') || article.querySelector('h3') || article.querySelector('.title');
+        
+        if (titleElement) {
+          title = titleElement.textContent.trim();
+          const linkInTitle = titleElement.querySelector('a');
+          if (linkInTitle) {
+            href = linkInTitle.href;
+          }
+        }
+        
+        // Si on n'a pas trouvé de lien dans le titre, cherchons ailleurs
+        if (!href) {
+          const mainLink = article.querySelector('a[href*="/news/"]');
+          if (mainLink) {
+            href = mainLink.href;
+            if (!title) title = mainLink.textContent.trim();
+          }
+        }
+        
+        // Recherche d'image
+        let image = null;
+        const imgElement = article.querySelector('img');
+        if (imgElement && imgElement.src) {
+          image = imgElement.src;
+        }
+        
+        // Si pas d'image trouvée, cherchons un div avec background-image
+        if (!image) {
+          const divs = article.querySelectorAll('div');
+          for (const div of divs) {
+            const style = window.getComputedStyle(div);
+            if (style.backgroundImage && style.backgroundImage !== 'none') {
+              image = style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
+              break;
             }
           }
         }
         
-        return { 
-          exactDate: dateEl ? dateEl.textContent.trim() : null,
-          image: imageUrl || null
-        };
-      });
-      
-      if (articleData.exactDate) {
-        articles[i].rawDate = articleData.exactDate;
-        articles[i].date = parseFrenchDate(articleData.exactDate);
-      } else if (articles[i].rawDate) {
-        articles[i].date = parseFrenchDate(articles[i].rawDate);
-      } else {
-        articles[i].date = new Date().toISOString();
+        // Recherche de la date dans l'article
+        let dateText = null;
+        const dateSelectors = ['.date', '.time', '.published', 'time', '.article-date'];
+        
+        for (const selector of dateSelectors) {
+          const dateElement = article.querySelector(selector);
+          if (dateElement) {
+            dateText = dateElement.textContent.trim();
+            break;
+          }
+        }
+        
+        // Filtrage des résultats
+        if (title && href && title.length > 10) {
+          results.push({
+            title,
+            link: href,
+            image: image || '',
+            rawDate: dateText,
+            source: 'Creusot Infos'
+          });
+        }
       }
       
-      // Si on n'a pas d'image depuis la liste, on utilise celle de la page détaillée
-      if (!articles[i].image && articleData.image) {
-        articles[i].image = articleData.image;
-      }
-      
-    } catch (error) {
-      console.error(`Erreur lors de la récupération des données pour ${articles[i].link}:`, error);
-      // En cas d'erreur, on utilise la date brute si disponible, sinon la date actuelle
-      if (articles[i].rawDate) {
-        articles[i].date = parseFrenchDate(articles[i].rawDate);
-      } else {
-        articles[i].date = new Date().toISOString();
+      // Limiter à 5 résultats maximum
+      return results.slice(0, 5);
+    });
+    
+    console.log(`Trouvé ${articles.length} articles, récupération des dates précises...`);
+    
+    // Pour chaque article, on visite sa page pour récupérer la date exacte
+    for (let i = 0; i < articles.length; i++) {
+      try {
+        console.log(`Visite de l'article: ${articles[i].link}`);
+        await page.goto(articles[i].link, { 
+          waitUntil: 'networkidle2', 
+          timeout: 20000 
+        });
+        
+        const articleData = await page.evaluate(() => {
+          // Chercher la date dans la page de l'article avec plusieurs sélecteurs possibles
+          const dateSelectors = [
+            '.article_infos .date', 
+            '.date', 
+            '.article-date',
+            'time',
+            '.published',
+            'meta[property="article:published_time"]',
+            'meta[itemprop="datePublished"]'
+          ];
+          
+          let exactDate = null;
+          
+          for (const selector of dateSelectors) {
+            const el = document.querySelector(selector);
+            if (el) {
+              if (el.tagName === 'META') {
+                exactDate = el.getAttribute('content');
+              } else {
+                exactDate = el.textContent.trim();
+              }
+              if (exactDate) break;
+            }
+          }
+          
+          // Chercher une meilleure image si possible
+          const imgSelectors = [
+            '.article_image img',
+            '.featured-image img',
+            '.article-image img',
+            'article img',
+            '.content img'
+          ];
+          
+          let bestImage = null;
+          
+          for (const selector of imgSelectors) {
+            const img = document.querySelector(selector);
+            if (img && img.src) {
+              bestImage = img.src;
+              break;
+            }
+          }
+          
+          // Si toujours pas d'image, chercher un div avec background-image
+          if (!bestImage) {
+            const bgSelectors = ['.article_image', '.featured-image', '.article-image'];
+            for (const selector of bgSelectors) {
+              const div = document.querySelector(selector);
+              if (div) {
+                const style = window.getComputedStyle(div);
+                if (style.backgroundImage && style.backgroundImage !== 'none') {
+                  bestImage = style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
+                  break;
+                }
+              }
+            }
+          }
+          
+          return { 
+            exactDate,
+            bestImage
+          };
+        });
+        
+        if (articleData.exactDate) {
+          articles[i].rawDate = articleData.exactDate;
+          
+          // Tentative de détection du format et conversion en ISO
+          if (articleData.exactDate.includes('T') && /\d{4}-\d{2}-\d{2}T/.test(articleData.exactDate)) {
+            // C'est déjà au format ISO
+            articles[i].date = articleData.exactDate;
+          } else {
+            // C'est probablement un format français
+            articles[i].date = parseFrenchDate(articleData.exactDate);
+          }
+        } else if (articles[i].rawDate) {
+          articles[i].date = parseFrenchDate(articles[i].rawDate);
+        } else {
+          articles[i].date = new Date().toISOString();
+        }
+        
+        // Mise à jour de l'image si on en a trouvé une meilleure
+        if (articleData.bestImage && (!articles[i].image || articles[i].image === '')) {
+          articles[i].image = articleData.bestImage;
+        }
+        
+      } catch (error) {
+        console.error(`Erreur lors de la récupération des données pour ${articles[i].link}:`, error);
+        // En cas d'erreur, on utilise la date brute si disponible, sinon la date actuelle
+        if (articles[i].rawDate) {
+          articles[i].date = parseFrenchDate(articles[i].rawDate);
+        } else {
+          articles[i].date = new Date().toISOString();
+        }
       }
     }
+
+    // Nettoyage final et formatage pour le fichier JSON
+    articles.forEach(article => {
+      delete article.rawDate; // On supprime la date brute qui ne nous est plus utile
+    });
+
+    console.log("Écriture des résultats dans le fichier JSON...");
+    
+    // S'assurer que le dossier data existe
+    if (!fs.existsSync('data')) {
+      fs.mkdirSync('data', { recursive: true });
+    }
+    
+    await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
+    console.log("✅ Fichier articles.json créé avec succès");
+    
+  } catch (error) {
+    console.error("Erreur lors du scraping:", error);
+  } finally {
+    await browser.close();
+    console.log("✅ Navigateur fermé, scraping terminé");
   }
-
-  // Nettoyage final avant d'écrire le fichier
-  articles.forEach(article => {
-    delete article.rawDate; // On supprime la date brute qui ne nous est plus utile
-  });
-
-  await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
-  await browser.close();
 }
 
 // Fonction pour convertir une date française en format ISO
 function parseFrenchDate(dateStr) {
-  // Format typique sur Creusot Infos: "Mercredi 9 Avril 2025 - 18:00"
+  if (!dateStr) return new Date().toISOString();
+  
   const monthsMap = {
     'janvier': 0, 'février': 1, 'mars': 2, 'avril': 3,
     'mai': 4, 'juin': 5, 'juillet': 6, 'août': 7,
-    'septembre': 8, 'octobre': 9, 'novembre': 10, 'décembre': 11
+    'septembre': 8, 'octobre': 9, 'novembre': 10, 'décembre': 11,
+    'jan': 0, 'fév': 1, 'mar': 2, 'avr': 3,
+    'mai': 4, 'juin': 5, 'juil': 6, 'août': 7,
+    'sep': 8, 'oct': 9, 'nov': 10, 'déc': 11
   };
   
   try {
-    // Normalisation de la chaîne: suppression du jour de la semaine et des tirets
+    // Essayer d'abord de parser un ISO date
+    if (/\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+      return new Date(dateStr).toISOString();
+    }
+    
+    // Normalisation de la chaîne: suppression du jour de la semaine
     const normalizedStr = dateStr
       .replace(/^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche)\s+/i, '')
       .replace(/\s*-\s*/g, ' ');
     
-    const parts = normalizedStr.split(' ');
+    // Extraction de la date
+    const dateMatch = normalizedStr.match(/(\d{1,2})\s+([^\s\d]+)\s+(\d{4})/i);
     
-    // Format attendu après normalisation: "9 Avril 2025 18:00"
-    const day = parseInt(parts[0], 10);
-    const monthLower = parts[1].toLowerCase();
+    if (!dateMatch) {
+      console.warn(`Format de date non reconnu: ${dateStr}`);
+      return new Date().toISOString();
+    }
+    
+    const day = parseInt(dateMatch[1], 10);
+    const monthLower = dateMatch[2].toLowerCase();
     const month = monthsMap[monthLower];
-    const year = parseInt(parts[2], 10);
+    const year = parseInt(dateMatch[3], 10);
     
-    const timeParts = parts[3] ? parts[3].split(':') : ['00', '00'];
-    const hour = parseInt(timeParts[0], 10);
-    const minute = parseInt(timeParts[1], 10);
+    // Extraction de l'heure
+    const timeMatch = normalizedStr.match(/(\d{1,2})[h:](\d{2})/i);
+    const hour = timeMatch ? parseInt(timeMatch[1], 10) : 0;
+    const minute = timeMatch ? parseInt(timeMatch[2], 10) : 0;
+    
+    if (month === undefined) {
+      console.warn(`Mois non reconnu: ${monthLower} dans "${dateStr}"`);
+      return new Date().toISOString();
+    }
     
     const date = new Date(Date.UTC(year, month, day, hour, minute));
     return date.toISOString();
@@ -163,6 +331,11 @@ function parseFrenchDate(dateStr) {
   }
 }
 
+// Lancement du scraping
+console.log("Démarrage du scraping...");
 scrapeCreusotInfos().then(() => {
-  console.log("✅ Scraping terminé.");
+  console.log("✅ Scraping terminé avec succès.");
+}).catch(error => {
+  console.error("❌ Erreur globale:", error);
+  process.exit(1);
 });
