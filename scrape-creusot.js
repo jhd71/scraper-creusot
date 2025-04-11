@@ -28,7 +28,7 @@ async function scrapeCreusotInfos() {
     const results = [];
     // On part du principe que chaque article possède un titre avec la classe "newsListTitle".
     // Nous utilisons ce sélecteur pour récupérer tous les titres et ensuite leurs conteneurs.
-    const titleElements = Array.from(document.querySelectorAll('.newsListTitle'));
+    const titleElements = Array.from(document.querySelectorAll('.newsListItem .newsListTitle'));
     
     titleElements.forEach(titleEl => {
       // On prend le conteneur parent (à adapter si nécessaire, par ex. avec .closest('.newsListItem'))
