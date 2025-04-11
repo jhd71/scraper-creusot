@@ -393,13 +393,8 @@ function parseFrenchDate(dateStr) {
       const hour = parseInt(match[4], 10);
       const minute = parseInt(match[5], 10);
       
-      // On ajoute 2 heures (fuseau horaire français en été)
+      // Utiliser Date.UTC sans ajustement - on veut garder l'heure exacte
       const date = new Date(Date.UTC(year, month, day, hour, minute));
-      
-      // L'heure locale française est UTC+2 en été
-      // donc on doit ajouter 2h pour que 05:17 en France soit aussi 05:17 en UTC
-      date.setUTCHours(date.getUTCHours() + 2);
-      
       return date.toISOString();
     }
     
@@ -411,9 +406,6 @@ function parseFrenchDate(dateStr) {
       const year = parseInt(match[3], 10);
       
       const date = new Date(Date.UTC(year, month, day, 0, 0));
-      // Même ajustement +2h
-      date.setUTCHours(date.getUTCHours() + 2);
-      
       return date.toISOString();
     }
     
