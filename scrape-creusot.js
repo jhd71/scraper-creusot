@@ -8,13 +8,16 @@ async function scrapeCreusotInfos() {
   });
 
   const page = await browser.newPage();
-  await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
-    waitUntil: 'networkidle2', // Attendre que tout soit chargé
-    timeout: 30000
-  });
+  // Attendre que la page soit complètement chargée
+await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
+  waitUntil: 'networkidle2',
+  timeout: 30000
+});
 
-  // Si nécessaire, insérer une pause pour être sûr que la page s'affiche complètement
-  await page.waitForTimeout(5000);
+// Remplacer await page.waitForTimeout(5000);
+await new Promise(resolve => setTimeout(resolve, 5000));
+
+await page.waitForSelector('div.newsFullPubli', { timeout: 20000 });
 
   try {
     await page.waitForSelector('div.newsFullPubli', { timeout: 20000 });
