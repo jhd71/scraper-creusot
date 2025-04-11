@@ -4,7 +4,12 @@ const fs = require('fs');
 async function scrapeCreusotInfos() {
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox',
+      '--disable-notifications', // Désactiver les notifications
+      '--window-size=1920,1080' // Fenêtre plus grande pour voir tout le contenu
+    ]
   });
 
   try {
@@ -13,6 +18,22 @@ async function scrapeCreusotInfos() {
     // Configuration pour simuler un utilisateur réel
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
+    // Bloquer les popups et bannières potentielles
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
+        request.continue();
+      } else {
+        // Bloquer les scripts de popup et d'annonces potentiels
+        const url = request.url().toLowerCase();
+        if (url.includes('popup') || url.includes('banner') || url.includes('ad.js')) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      }
+    });
+
     console.log("Accès à la page des faits divers...");
     await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
       waitUntil: 'networkidle2',
@@ -21,26 +42,78 @@ async function scrapeCreusotInfos() {
 
     // Attendre que la page soit chargée
     await page.waitForSelector('body', { timeout: 15000 });
-    console.log("Page chargée, recherche des articles...");
-
-    // Capture d'écran pour le débogage (optionnel - utile pour voir ce que Puppeteer voit)
-    await page.screenshot({ path: 'debug-screenshot.png' });
-
+    console.log("Page chargée");
+    
+    // Prendre une capture d'écran pour débogage
+    await page.screenshot({ path: 'debug-page.png', fullPage: true });
+    
+    // Fermer toute bannière ou popup qui pourrait obscurcir le contenu
+    await page.evaluate(() => {
+      // Chercher des boutons de fermeture typiques
+      const closeButtons = Array.from(document.querySelectorAll('button, a, div')).filter(el => {
+        const text = el.textContent.toLowerCase();
+        const classes = el.className.toLowerCase();
+        return text.includes('fermer') || 
+               text.includes('close') || 
+               text.includes('×') ||
+               classes.includes('close') || 
+               classes.includes('dismiss');
+      });
+      
+      // Cliquer sur tous les boutons de fermeture trouvés
+      closeButtons.forEach(button => button.click());
+      
+      // Aussi, masquer les éléments qui pourraient être des popups/bannières
+      const possiblePopups = document.querySelectorAll('.popup, .banner, .modal, .notification');
+      possiblePopups.forEach(popup => {
+        if (popup) popup.style.display = 'none';
+      });
+    });
+    
+    // Attendre un peu que les popups disparaissent
+    await page.waitForTimeout(1000);
+    
+    console.log("Recherche des articles de faits divers...");
+    
+    // Extraction des articles spécifiquement dans la section des faits divers
     const articles = await page.evaluate(() => {
-      // Essayons plusieurs sélecteurs pour trouver les articles
-      const selectors = [
-        '.listingArticle', 
-        '.article-item',
-        '.news-item',
-        '.article',
-        'article'
+      // Ignorer le widget d'actualités en direct
+      const ignoreSelectors = [
+        '.actualites-direct',
+        '.widget-actualites',
+        '.breaking-news',
+        '.live-news'
+      ];
+      
+      // Cacher les éléments à ignorer
+      ignoreSelectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          if (el) el.style.display = 'none';
+        });
+      });
+      
+      // Recherche des articles de faits divers dans le contenu principal
+      const mainContent = document.querySelector('#main-content') || 
+                          document.querySelector('.main-content') || 
+                          document.querySelector('main') ||
+                          document.querySelector('.content') || 
+                          document.body;
+      
+      // Recherche des articles dans le contenu principal
+      const articlesSelectors = [
+        '.article', 
+        '.news-item', 
+        'article',
+        '.post',
+        '.list-article'
       ];
       
       let articleElements = [];
       
-      // Essayer chaque sélecteur jusqu'à en trouver un qui fonctionne
-      for (const selector of selectors) {
-        const elements = Array.from(document.querySelectorAll(selector));
+      // Essayer de trouver des articles avec les sélecteurs courants
+      for (const selector of articlesSelectors) {
+        const elements = Array.from(mainContent.querySelectorAll(selector));
         if (elements.length > 0) {
           articleElements = elements;
           console.log(`Trouvé ${elements.length} articles avec le sélecteur ${selector}`);
@@ -48,66 +121,89 @@ async function scrapeCreusotInfos() {
         }
       }
       
-      // Si aucun sélecteur ne fonctionne, essayons une approche plus générique
+      // Si rien n'est trouvé, chercher des liens qui pourraient être des articles
       if (articleElements.length === 0) {
-        // Recherche d'éléments contenant des liens et du texte pouvant être des articles
-        const allLinks = Array.from(document.querySelectorAll('a[href*="/news/"]'));
-        const potentialArticles = new Set();
+        const allLinks = Array.from(mainContent.querySelectorAll('a[href*="/faits-divers/"]'));
         
+        // Remonter à un élément parent qui pourrait être l'article complet
+        const potentialArticles = new Set();
         for (const link of allLinks) {
-          // Remonter pour trouver un conteneur potentiel d'article
-          let parent = link.parentElement;
-          for (let i = 0; i < 5 && parent; i++) {
-            if (parent.querySelectorAll('a[href*="/news/"]').length === 1) {
-              potentialArticles.add(parent);
+          let current = link;
+          for (let i = 0; i < 5 && current; i++) {
+            if (current.tagName === 'ARTICLE' || 
+                current.classList.contains('article') || 
+                current.classList.contains('news-item')) {
+              potentialArticles.add(current);
               break;
             }
-            parent = parent.parentElement;
+            current = current.parentElement;
+          }
+          
+          // Si aucun parent article n'est trouvé, utiliser le parent direct
+          if (!potentialArticles.has(link) && link.parentElement) {
+            potentialArticles.add(link.closest('div') || link.parentElement);
           }
         }
         
         articleElements = Array.from(potentialArticles);
-        console.log(`Approche alternative: trouvé ${articleElements.length} articles potentiels`);
       }
       
-      // Extraction des informations pour chaque article trouvé
+      // Si toujours rien, chercher des éléments avec image et texte
+      if (articleElements.length === 0) {
+        const divs = Array.from(mainContent.querySelectorAll('div'));
+        const potentialArticles = divs.filter(div => {
+          // Un div qui contient une image et du texte est probablement un article
+          const hasImage = div.querySelector('img') !== null;
+          const hasText = div.textContent.trim().length > 50;
+          const hasLink = div.querySelector('a') !== null;
+          return hasImage && hasText && hasLink;
+        });
+        
+        articleElements = potentialArticles;
+      }
+      
+      console.log(`Total de ${articleElements.length} éléments d'articles trouvés`);
+      
+      // Extraction des données des articles
       const results = [];
       
-      for (const article of articleElements) {
-        // Recherche du titre et du lien (on essaie plusieurs approches)
+      for (const articleEl of articleElements) {
+        // Recherche du titre
         let title = null;
-        let href = null;
-        let titleElement = article.querySelector('h2') || article.querySelector('h3') || article.querySelector('.title');
+        let titleElement = articleEl.querySelector('h1, h2, h3, h4, .title, .headline');
         
         if (titleElement) {
           title = titleElement.textContent.trim();
-          const linkInTitle = titleElement.querySelector('a');
-          if (linkInTitle) {
-            href = linkInTitle.href;
+        }
+        
+        // Recherche du lien
+        let link = null;
+        let linkElement = titleElement?.querySelector('a') || articleEl.querySelector('a');
+        
+        if (linkElement) {
+          link = linkElement.href;
+          // Si pas de titre trouvé, utiliser le texte du lien
+          if (!title) {
+            title = linkElement.textContent.trim();
           }
         }
         
-        // Si on n'a pas trouvé de lien dans le titre, cherchons ailleurs
-        if (!href) {
-          const mainLink = article.querySelector('a[href*="/news/"]');
-          if (mainLink) {
-            href = mainLink.href;
-            if (!title) title = mainLink.textContent.trim();
-          }
+        // Filtrer pour s'assurer que c'est bien un article de faits divers
+        if (link && !link.includes('/faits-divers/')) {
+          continue;
         }
         
-        // Recherche d'image
+        // Recherche de l'image
         let image = null;
-        const imgElement = article.querySelector('img');
+        const imgElement = articleEl.querySelector('img');
+        
         if (imgElement && imgElement.src) {
           image = imgElement.src;
-        }
-        
-        // Si pas d'image trouvée, cherchons un div avec background-image
-        if (!image) {
-          const divs = article.querySelectorAll('div');
-          for (const div of divs) {
-            const style = window.getComputedStyle(div);
+        } else {
+          // Recherche d'une image en background
+          const elementsWithBg = Array.from(articleEl.querySelectorAll('*'));
+          for (const el of elementsWithBg) {
+            const style = window.getComputedStyle(el);
             if (style.backgroundImage && style.backgroundImage !== 'none') {
               image = style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
               break;
@@ -115,23 +211,23 @@ async function scrapeCreusotInfos() {
           }
         }
         
-        // Recherche de la date dans l'article
+        // Recherche de la date
         let dateText = null;
-        const dateSelectors = ['.date', '.time', '.published', 'time', '.article-date'];
+        const dateElement = articleEl.querySelector('.date, time, .published, [datetime]');
         
-        for (const selector of dateSelectors) {
-          const dateElement = article.querySelector(selector);
-          if (dateElement) {
+        if (dateElement) {
+          if (dateElement.hasAttribute('datetime')) {
+            dateText = dateElement.getAttribute('datetime');
+          } else {
             dateText = dateElement.textContent.trim();
-            break;
           }
         }
         
-        // Filtrage des résultats
-        if (title && href && title.length > 10) {
+        // Vérification finale et ajout au résultat
+        if (title && link && title.length > 10) {
           results.push({
             title,
-            link: href,
+            link,
             image: image || '',
             rawDate: dateText,
             source: 'Creusot Infos'
@@ -139,96 +235,106 @@ async function scrapeCreusotInfos() {
         }
       }
       
-      // Limiter à 5 résultats maximum
-      return results.slice(0, 5);
+      console.log(`${results.length} articles valides trouvés`);
+      return results.slice(0, 5); // Limiter à 5 résultats
     });
     
-    console.log(`Trouvé ${articles.length} articles, récupération des dates précises...`);
+    console.log(`Trouvé ${articles.length} articles de faits divers, visite des pages individuelles...`);
     
-    // Pour chaque article, on visite sa page pour récupérer la date exacte
+    // Visiter chaque page d'article pour obtenir la date exacte
     for (let i = 0; i < articles.length; i++) {
       try {
-        console.log(`Visite de l'article: ${articles[i].link}`);
+        console.log(`Visite de l'article ${i+1}: ${articles[i].link}`);
         await page.goto(articles[i].link, { 
           waitUntil: 'networkidle2', 
           timeout: 20000 
         });
         
+        // Capture d'écran de l'article pour débogage
+        if (i === 0) {
+          await page.screenshot({ path: `debug-article.png`, fullPage: true });
+        }
+        
         const articleData = await page.evaluate(() => {
-          // Chercher la date dans la page de l'article avec plusieurs sélecteurs possibles
-          const dateSelectors = [
-            '.article_infos .date', 
-            '.date', 
-            '.article-date',
-            'time',
-            '.published',
-            'meta[property="article:published_time"]',
-            'meta[itemprop="datePublished"]'
-          ];
-          
+          // Chercher la date avec plusieurs approches
           let exactDate = null;
           
-          for (const selector of dateSelectors) {
-            const el = document.querySelector(selector);
-            if (el) {
-              if (el.tagName === 'META') {
-                exactDate = el.getAttribute('content');
-              } else {
-                exactDate = el.textContent.trim();
-              }
+          // 1. Méta tags (les plus fiables)
+          const metaTags = [
+            'meta[property="article:published_time"]',
+            'meta[itemprop="datePublished"]',
+            'meta[name="date"]',
+            'meta[name="publication-date"]'
+          ];
+          
+          for (const selector of metaTags) {
+            const meta = document.querySelector(selector);
+            if (meta) {
+              exactDate = meta.getAttribute('content');
               if (exactDate) break;
             }
           }
           
-          // Chercher une meilleure image si possible
-          const imgSelectors = [
-            '.article_image img',
-            '.featured-image img',
-            '.article-image img',
-            'article img',
-            '.content img'
-          ];
-          
-          let bestImage = null;
-          
-          for (const selector of imgSelectors) {
-            const img = document.querySelector(selector);
-            if (img && img.src) {
-              bestImage = img.src;
-              break;
-            }
-          }
-          
-          // Si toujours pas d'image, chercher un div avec background-image
-          if (!bestImage) {
-            const bgSelectors = ['.article_image', '.featured-image', '.article-image'];
-            for (const selector of bgSelectors) {
-              const div = document.querySelector(selector);
-              if (div) {
-                const style = window.getComputedStyle(div);
-                if (style.backgroundImage && style.backgroundImage !== 'none') {
-                  bestImage = style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
-                  break;
+          // 2. Éléments HTML avec date
+          if (!exactDate) {
+            const dateSelectors = [
+              '.article-info .date',
+              '.article_info .date',
+              '.meta .date',
+              '.post-meta time',
+              '.post-date',
+              '.date',
+              'time'
+            ];
+            
+            for (const selector of dateSelectors) {
+              const el = document.querySelector(selector);
+              if (el) {
+                if (el.hasAttribute('datetime')) {
+                  exactDate = el.getAttribute('datetime');
+                } else {
+                  exactDate = el.textContent.trim();
                 }
+                if (exactDate) break;
               }
             }
           }
           
-          return { 
-            exactDate,
-            bestImage
-          };
+          // 3. Recherche de motifs de date dans le texte
+          if (!exactDate) {
+            const bodyText = document.body.textContent;
+            const dateRegex = /(\d{1,2})[/-\s](\w+)[/-\s](\d{4})/;
+            const match = bodyText.match(dateRegex);
+            if (match) {
+              exactDate = match[0];
+            }
+          }
+          
+          // Recherche d'une meilleure image
+          let bestImage = null;
+          
+          const mainImage = document.querySelector('.article-image img') || 
+                           document.querySelector('.featured-image img') ||
+                           document.querySelector('.post-thumbnail img') ||
+                           document.querySelector('article img');
+          
+          if (mainImage && mainImage.src) {
+            bestImage = mainImage.src;
+          }
+          
+          return { exactDate, bestImage };
         });
         
+        // Traitement de la date
         if (articleData.exactDate) {
           articles[i].rawDate = articleData.exactDate;
           
-          // Tentative de détection du format et conversion en ISO
+          // Tentative de détection du format
           if (articleData.exactDate.includes('T') && /\d{4}-\d{2}-\d{2}T/.test(articleData.exactDate)) {
-            // C'est déjà au format ISO
+            // Format ISO
             articles[i].date = articleData.exactDate;
           } else {
-            // C'est probablement un format français
+            // Format français ou autre
             articles[i].date = parseFrenchDate(articleData.exactDate);
           }
         } else if (articles[i].rawDate) {
@@ -243,8 +349,8 @@ async function scrapeCreusotInfos() {
         }
         
       } catch (error) {
-        console.error(`Erreur lors de la récupération des données pour ${articles[i].link}:`, error);
-        // En cas d'erreur, on utilise la date brute si disponible, sinon la date actuelle
+        console.error(`Erreur lors de la visite de l'article ${i+1}:`, error);
+        // Fallback si erreur
         if (articles[i].rawDate) {
           articles[i].date = parseFrenchDate(articles[i].rawDate);
         } else {
@@ -253,10 +359,14 @@ async function scrapeCreusotInfos() {
       }
     }
 
-    // Nettoyage final et formatage pour le fichier JSON
-    articles.forEach(article => {
-      delete article.rawDate; // On supprime la date brute qui ne nous est plus utile
-    });
+    // Nettoyage et finalisation
+    const finalArticles = articles.map(article => ({
+      title: article.title,
+      link: article.link,
+      image: article.image,
+      date: article.date,
+      source: 'Creusot Infos'
+    }));
 
     console.log("Écriture des résultats dans le fichier JSON...");
     
@@ -265,7 +375,7 @@ async function scrapeCreusotInfos() {
       fs.mkdirSync('data', { recursive: true });
     }
     
-    await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
+    await fs.promises.writeFile('data/articles.json', JSON.stringify(finalArticles, null, 2));
     console.log("✅ Fichier articles.json créé avec succès");
     
   } catch (error) {
@@ -290,41 +400,74 @@ function parseFrenchDate(dateStr) {
   };
   
   try {
-    // Essayer d'abord de parser un ISO date
+    // 1. Tenter de parser un format ISO standard
     if (/\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-      return new Date(dateStr).toISOString();
+      const isoDate = new Date(dateStr);
+      if (!isNaN(isoDate.getTime())) {
+        return isoDate.toISOString();
+      }
     }
     
-    // Normalisation de la chaîne: suppression du jour de la semaine
-    const normalizedStr = dateStr
+    // 2. Normaliser le texte de date
+    let normalizedStr = dateStr
       .replace(/^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche)\s+/i, '')
-      .replace(/\s*-\s*/g, ' ');
+      .replace(/\s*-\s*/g, ' ')
+      .trim();
+      
+    // 3. Formats français possibles
     
-    // Extraction de la date
-    const dateMatch = normalizedStr.match(/(\d{1,2})\s+([^\s\d]+)\s+(\d{4})/i);
+    // Format: "9 avril 2025 18:00"
+    let match = normalizedStr.match(/(\d{1,2})\s+([^\s\d]+)\s+(\d{4})(?:\s+(\d{1,2})[h:](\d{2}))?/i);
     
-    if (!dateMatch) {
-      console.warn(`Format de date non reconnu: ${dateStr}`);
-      return new Date().toISOString();
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const monthStr = match[2].toLowerCase();
+      const month = monthsMap[monthStr];
+      const year = parseInt(match[3], 10);
+      
+      const hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      
+      if (month !== undefined) {
+        const date = new Date(Date.UTC(year, month, day, hour, minute));
+        return date.toISOString();
+      }
     }
     
-    const day = parseInt(dateMatch[1], 10);
-    const monthLower = dateMatch[2].toLowerCase();
-    const month = monthsMap[monthLower];
-    const year = parseInt(dateMatch[3], 10);
+    // Format: "09/04/2025 18:00"
+    match = normalizedStr.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:\s+(\d{1,2})[h:](\d{2}))?/);
     
-    // Extraction de l'heure
-    const timeMatch = normalizedStr.match(/(\d{1,2})[h:](\d{2})/i);
-    const hour = timeMatch ? parseInt(timeMatch[1], 10) : 0;
-    const minute = timeMatch ? parseInt(timeMatch[2], 10) : 0;
-    
-    if (month === undefined) {
-      console.warn(`Mois non reconnu: ${monthLower} dans "${dateStr}"`);
-      return new Date().toISOString();
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1; // Les mois en JS sont 0-indexés
+      const year = parseInt(match[3], 10);
+      
+      const hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      
+      const date = new Date(Date.UTC(year, month, day, hour, minute));
+      return date.toISOString();
     }
     
-    const date = new Date(Date.UTC(year, month, day, hour, minute));
-    return date.toISOString();
+    // Format: "2025-04-09 18:00"
+    match = normalizedStr.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})(?:\s+(\d{1,2})[h:](\d{2}))?/);
+    
+    if (match) {
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const day = parseInt(match[3], 10);
+      
+      const hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      
+      const date = new Date(Date.UTC(year, month, day, hour, minute));
+      return date.toISOString();
+    }
+    
+    // Si aucun format reconnu, utiliser la date actuelle
+    console.warn(`Format de date non reconnu: "${dateStr}"`);
+    return new Date().toISOString();
+    
   } catch (e) {
     console.error("Erreur lors du parsing de la date:", dateStr, e);
     return new Date().toISOString();
