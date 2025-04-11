@@ -3,57 +3,53 @@ const fs = require('fs');
 
 async function scrapeCreusotInfos() {
   const browser = await puppeteer.launch({
-    headless: true, // Mode headless pour GitHub Actions
+    headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
+
   const page = await browser.newPage();
-  
   const listingUrl = 'https://www.creusot-infos.com/news/faits-divers/';
   await page.goto(listingUrl, { 
-    waitUntil: 'networkidle2', 
-    timeout: 30000 
+    waitUntil: 'networkidle2',
+    timeout: 30000
   });
   
   // Attendre quelques secondes pour que le contenu dynamique se charge
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Optionnel : Pour déboguer, sauvegardez le HTML obtenu :
-  // const content = await page.content();
-  // await fs.promises.writeFile('debug_listing.html', content);
+  // Pour déboguer, vous pouvez sauvegarder le HTML du listing
+  // const debugContent = await page.content();
+  // await fs.promises.writeFile('debug_listing.html', debugContent);
 
-  // Extraction des articles en se basant sur la structure séquentielle
+  // Extraction des articles par index, en supposant que les arrays
+  // de titres, dates et résumés sont alignés
   const articles = await page.evaluate(() => {
+    // Récupérer tous les éléments correspondants aux titres, dates et résumés
+    const titleNodes = Array.from(document.querySelectorAll('.newsListTitle'));
+    const dateNodes = Array.from(document.querySelectorAll('.newsListPubli'));
+    const resumeNodes = Array.from(document.querySelectorAll('.newsListResume'));
+
+    // (Optionnel) Récupérer une image à partir des titres (s'il y en a)
+    const imageNodes = titleNodes.map(el => {
+      const img = el.querySelector('img');
+      return img ? img.src : '';
+    });
+
     const results = [];
-    // On récupère tous les éléments ayant la classe "newsListTitle"
-    const titleEls = Array.from(document.querySelectorAll('.newsListTitle'));
-
-    titleEls.forEach(titleEl => {
-      // Récupération du titre et du lien
-      const linkEl = titleEl.querySelector('a');
+    // On prend le minimum des nombres récupérés pour éviter les erreurs d'index
+    const count = Math.min(titleNodes.length, dateNodes.length, resumeNodes.length);
+    for (let i = 0; i < count; i++) {
+      // Récupérer le titre et le lien
+      const titleEl = titleNodes[i];
+      const aEl = titleEl.querySelector('a');
       const title = titleEl.textContent.trim();
-      const link = linkEl ? linkEl.href : '';
+      const link = aEl ? aEl.href : '';
 
-      // Supposons que le prochain élément frère est celui de la date
-      let dateText = '';
-      let resume = '';
-      const dateEl = titleEl.nextElementSibling;
-      if (dateEl && dateEl.classList.contains('newsListPubli')) {
-        dateText = dateEl.textContent.trim();
-      }
-      // Et celui qui suit immédiatement la date est le résumé
-      const resumeEl = dateEl ? dateEl.nextElementSibling : null;
-      if (resumeEl && resumeEl.classList.contains('newsListResume')) {
-        resume = resumeEl.textContent.trim();
-      }
-      
-      // Récupérer l'image (si présente) dans le même conteneur
-      const imageEl = titleEl.parentElement.querySelector('img');
-      const image = imageEl ? imageEl.src : '';
-
-      // Conversion de la date du format "DD/MM/YYYY HH:mm" en ISO
+      // Récupérer la date et le convertir
+      const dateText = dateNodes[i] ? dateNodes[i].textContent.trim() : '';
       let isoDate = '';
       if (dateText) {
-        // Exemple : "10/04/2025 16:26" devient "2025-04-10T16:26:00"
+        // Le format est supposé "DD/MM/YYYY HH:mm", par exemple "10/04/2025 16:26"
         const parts = dateText.split(' ');
         if (parts.length === 2) {
           const dateParts = parts[0].split('/');
@@ -62,19 +58,23 @@ async function scrapeCreusotInfos() {
           }
         }
       }
+      
+      // Récupérer le résumé
+      const summary = resumeNodes[i] ? resumeNodes[i].textContent.trim() : '';
 
-      // On ajoute l'article s'il a un titre, un lien et une date valide
+      // On ajoute l'article s'il contient toutes les informations essentielles
       if (title && link && isoDate && title.length > 5) {
         results.push({
           title,
           link,
-          image,
+          image: imageNodes[i],
           date: isoDate,
-          summary: resume,
+          summary,
           source: 'Creusot Infos'
         });
       }
-    });
+    }
+    
     return results;
   });
 
