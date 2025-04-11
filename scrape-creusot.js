@@ -393,8 +393,8 @@ function parseFrenchDate(dateStr) {
       const hour = parseInt(match[4], 10);
       const minute = parseInt(match[5], 10);
       
-      // Utiliser Date.UTC sans ajustement - on veut garder l'heure exacte
-      const date = new Date(Date.UTC(year, month, day, hour, minute));
+      // Soustraire 2 heures pour compenser l'ajout automatique sur votre site
+      const date = new Date(Date.UTC(year, month, day, hour - 2, minute));
       return date.toISOString();
     }
     
@@ -405,7 +405,8 @@ function parseFrenchDate(dateStr) {
       const month = parseInt(match[2], 10) - 1;
       const year = parseInt(match[3], 10);
       
-      const date = new Date(Date.UTC(year, month, day, 0, 0));
+      // Soustraire 2 heures également ici
+      const date = new Date(Date.UTC(year, month, day, -2, 0));
       return date.toISOString();
     }
     
