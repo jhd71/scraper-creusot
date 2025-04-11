@@ -35,3 +35,9 @@ jobs:
           git add data/articles.json
           git commit -m "🤖 Mise à jour automatique des articles $(date +'%Y-%m-%d %H:%M:%S')" || echo "Aucun changement"
           git push
+          - name: Upload debug file
+  uses: actions/upload-artifact@v3
+  with:
+    name: debug-listing
+    path: debug_listing.html
+
