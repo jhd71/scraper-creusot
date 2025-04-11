@@ -241,108 +241,81 @@ async function scrapeCreusotInfos() {
     selectedArticles = selectedArticles.slice(0, 5);
     
     // Visiter chaque article pour obtenir les dates précises
-    for (let i = 0; i < selectedArticles.length; i++) {
-      try {
-        console.log(`Visite de l'article ${i+1}: ${selectedArticles[i].title}`);
-        await page.goto(selectedArticles[i].link, { 
-          waitUntil: 'networkidle2', 
-          timeout: 20000 
-        });
+for (let i = 0; i < selectedArticles.length; i++) {
+  try {
+    console.log(`Visite de l'article ${i+1}: ${selectedArticles[i].title}`);
+    await page.goto(selectedArticles[i].link, { 
+      waitUntil: 'networkidle2', 
+      timeout: 20000 
+    });
         
         // Capture d'écran pour le premier article
         if (i === 0) {
           await page.screenshot({ path: 'debug-article-page.png', fullPage: false });
         }
         
-        // Extraction des informations détaillées de l'article
-        const articleData = await page.evaluate(() => {
-          // Regarder d'abord au début de la page où se trouve généralement la date
-          const dateElements = document.querySelectorAll('.date, time, [class*="date"], [class*="time"]');
-          
-          for (const element of dateElements) {
-            const dateText = element.textContent.trim();
-            // Si on trouve une date au format DD/MM/YYYY
-            if (dateText.match(/\d{2}\/\d{2}\/\d{4}/)) {
-              return { rawDate: dateText };
-            }
-          }
-          
-          // Si on ne trouve pas dans les éléments spécifiques, 
-          // chercher dans tout le texte de la page
-          const pageText = document.body.textContent;
-          const dateMatch = pageText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-          
-          if (dateMatch) {
-            return {
-              day: dateMatch[1],
-              month: dateMatch[2],
-              year: dateMatch[3],
-              hour: dateMatch[4],
-              minute: dateMatch[5],
-              rawDate: dateMatch[0]
-            };
-          }
-          
-          // Si toujours rien, chercher dans le HTML
-          const htmlContent = document.documentElement.innerHTML;
-          const htmlDateMatch = htmlContent.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-          
-          if (htmlDateMatch) {
-            return {
-              day: htmlDateMatch[1],
-              month: htmlDateMatch[2],
-              year: htmlDateMatch[3],
-              hour: htmlDateMatch[4],
-              minute: htmlDateMatch[5],
-              rawDate: htmlDateMatch[0]
-            };
-          }
-          
-          // Si aucune date n'est trouvée
-          return { rawDate: null };
-        });
-        
-        // Construire la date ISO
-        if (articleData.day && articleData.month && articleData.year) {
-          const date = new Date(
-            parseInt(articleData.year),
-            parseInt(articleData.month) - 1, // Les mois en JS sont 0-indexés
-            parseInt(articleData.day),
-            parseInt(articleData.hour || '0'),
-            parseInt(articleData.minute || '0')
-          );
-          selectedArticles[i].date = date.toISOString();
-          console.log(`Date trouvée pour l'article ${i+1}: ${articleData.rawDate} -> ${selectedArticles[i].date}`);
-        } else if (articleData.rawDate) {
-          const parsedDate = parseFrenchDate(articleData.rawDate);
-          if (parsedDate) {
-            selectedArticles[i].date = parsedDate;
-            console.log(`Date brute trouvée pour l'article ${i+1}: ${articleData.rawDate} -> ${selectedArticles[i].date}`);
-          } else {
-            // Si on ne peut pas parser la date, utiliser une date par défaut
-            const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
-            selectedArticles[i].date = defaultDate.toISOString();
-            console.log(`Date non parsable pour l'article ${i+1}: ${articleData.rawDate}, utilisation de la date par défaut`);
-          }
-        } else {
-          // Si aucune date n'est trouvée, utiliser une date par défaut
-          const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
-          selectedArticles[i].date = defaultDate.toISOString();
-          console.log(`Aucune date trouvée pour l'article ${i+1}, utilisation de la date par défaut`);
-        }
-        
-        // Récupérer aussi une meilleure image si disponible
-        const imageUrl = await page.evaluate(() => {
-          const mainImage = document.querySelector('.article_image img') || 
-                           document.querySelector('article img') ||
-                           document.querySelector('.content img');
-          
-          return mainImage ? mainImage.src : null;
-        });
-        
-        if (imageUrl && (!selectedArticles[i].image || selectedArticles[i].image === '')) {
-          selectedArticles[i].image = imageUrl;
-        }
+         // Extraction des informations détaillées de l'article
+const articleData = await page.evaluate(() => {
+  // Rechercher la date au format DD/MM/YYYY HH:MM
+  let rawDateText = null;
+  const dateElements = document.querySelectorAll('.date, time');
+  
+  for (const element of dateElements) {
+    const text = element.textContent.trim();
+    if (text.match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/)) {
+      rawDateText = text; // Stocker la date exacte comme texte
+      break;
+    }
+  }
+      
+  // Si on ne trouve pas dans les éléments spécifiques, chercher dans le texte
+  if (!rawDateText) {
+    const pageText = document.body.textContent;
+    const dateMatch = pageText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+    if (dateMatch) {
+      rawDateText = dateMatch[0];
+    }
+  }
+  
+  // Si toujours rien, chercher dans le HTML
+  if (!rawDateText) {
+    const htmlContent = document.documentElement.innerHTML;
+    const htmlDateMatch = htmlContent.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+    if (htmlDateMatch) {
+      rawDateText = htmlDateMatch[0];
+    }
+  }
+  
+  // Chercher la meilleure image
+  const mainImage = document.querySelector('.article_image img') || 
+                   document.querySelector('article img') ||
+                   document.querySelector('.content img');
+  
+  return {
+    rawDate: rawDateText,
+    mainImage: mainImage ? mainImage.src : null
+  };
+});
+
+// Traitement des dates
+if (articleData.rawDate) {
+  // Stocker la date brute
+  selectedArticles[i].rawDate = articleData.rawDate;
+  
+  // Convertir en date ISO avec correction de fuseau horaire
+  selectedArticles[i].date = parseFrenchDate(articleData.rawDate);
+  console.log(`Date trouvée pour l'article ${i+1}: ${articleData.rawDate} -> ${selectedArticles[i].date}`);
+} else {
+  // Si aucune date n'est trouvée, utiliser une date par défaut
+  const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
+  selectedArticles[i].date = defaultDate.toISOString();
+  console.log(`Aucune date trouvée pour l'article ${i+1}, utilisation de la date par défaut`);
+}
+
+// Mise à jour de l'image
+if (articleData.mainImage && (!selectedArticles[i].image || selectedArticles[i].image === '')) {
+  selectedArticles[i].image = articleData.mainImage;
+}
         
       } catch (error) {
         console.error(`Erreur lors de la visite de l'article ${i+1}:`, error);
@@ -352,14 +325,15 @@ async function scrapeCreusotInfos() {
       }
     }
 
-    // Formatage final pour le fichier JSON
-    const finalArticles = selectedArticles.map(article => ({
-      title: article.title,
-      link: article.link,
-      image: article.image || '',
-      date: article.date,
-      source: 'Creusot Infos'
-    }));
+   // Formatage final pour le fichier JSON
+const finalArticles = selectedArticles.map(article => ({
+  title: article.title,
+  link: article.link,
+  image: article.image || '',
+  date: article.date, // Date ISO (pour le tri)
+  rawDate: article.rawDate || '', // Date exacte comme texte (pour l'affichage)
+  source: 'Creusot Infos'
+}));
 
     console.log("Écriture des résultats dans le fichier JSON...");
     
