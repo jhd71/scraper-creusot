@@ -1,49 +1,37 @@
-const puppeteer = require('puppeteer');
-const fs = require('fs');
+name: Scrape Creusot Infos
 
-async function scrapeCreusotInfos() {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+on:
+  schedule:
+    - cron: '0 * * * *'  # toutes les heures
+  workflow_dispatch:
 
-  const page = await browser.newPage();
-  await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
-    waitUntil: 'domcontentloaded',
-    timeout: 20000
-  });
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
 
-  await page.waitForSelector('body', { timeout: 10000 });
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'false'
+      PUPPETEER_PRODUCT: 'chrome'
 
-  const articles = await page.evaluate(() => {
-    const links = Array.from(document.querySelectorAll('a'));
-    const results = [];
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    for (const link of links) {
-      const title = link.textContent?.trim();
-      const href = link.href;
-      const image = link.querySelector('img')?.src;
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
 
-      if (title && href && image && title.length > 10) {
-        results.push({
-          title,
-          link: href,
-          image,
-          date: new Date().toISOString(),
-          source: 'Creusot Infos'
-        });
-      }
+      - name: Install dependencies
+        run: npm ci
 
-      if (results.length >= 5) break;
-    }
+      - name: Run scraper
+        run: npm start
 
-    return results;
-  });
-
-  await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
-  await browser.close();
-}
-
-scrapeCreusotInfos().then(() => {
-  console.log("✅ Scraping terminé.");
-});
+      - name: Commit and push updated articles.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/articles.json
+          git commit -m "🤖 Mise à jour automatique des articles $(date +'%Y-%m-%d %H:%M:%S')" || echo "Aucun changement"
+          git push
