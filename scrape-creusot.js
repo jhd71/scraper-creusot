@@ -3,41 +3,37 @@ const fs = require('fs');
 
 async function scrapeCreusotInfos() {
   const browser = await puppeteer.launch({
-    headless: true,  // Mode headless pour GitHub Actions
+    headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
   const page = await browser.newPage();
+  
+  // 1) User-Agent réaliste
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+    'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+    'Chrome/101.0.4951.64 Safari/537.36');
+
   const listingUrl = 'https://www.creusot-infos.com/news/faits-divers/';
   
+  // 2) Charger la page plus longtemps
   await page.goto(listingUrl, {
     waitUntil: 'networkidle2',
-    timeout: 30000
+    timeout: 60000 
   });
 
-  // Attendre quelques secondes supplémentaires pour que le contenu soit chargé
-  await new Promise(resolve => setTimeout(resolve, 5000));
+  // 10 secondes de plus pour être sûr
+  await new Promise(resolve => setTimeout(resolve, 10000));
   
-  // DEBUG (optionnel) : Sauvegarder le contenu de la page dans un fichier pour vérification
-  // const content = await page.content();
-  // await fs.promises.writeFile('debug_listing.html', content);
-  
+  // 3) Sauvegarde du HTML dans debug_listing.html
+  const content = await page.content();
+  await fs.promises.writeFile('debug_listing.html', content);
+  console.log("Contenu du listing sauvegardé dans debug_listing.html");
+
+  // Essayer de récupérer .newsListItem
   const articles = await page.evaluate(() => {
     const results = [];
-    
-    // Tente d'utiliser un conteneur commun pour chaque article (par exemple, ".newsListItem")
-    let items = document.querySelectorAll('.newsListItem');
-    
-    // Si aucun conteneur n'est trouvé, alors on récupère les éléments à partir du titre
-    if (items.length === 0) {
-      const titleEls = document.querySelectorAll('.newsListTitle');
-      items = [];
-      titleEls.forEach(el => {
-        // Utilisation du parent direct comme conteneur (ou modifiez avec .closest('div') si nécessaire)
-        if (el.parentElement) items.push(el.parentElement);
-      });
-    }
-    
+    const items = document.querySelectorAll('.newsListItem');
     items.forEach(item => {
       const titleEl = item.querySelector('.newsListTitle');
       const dateEl = item.querySelector('.newsListPubli');
@@ -50,10 +46,10 @@ async function scrapeCreusotInfos() {
       const image = imageEl ? imageEl.src : '';
       const dateText = dateEl ? dateEl.textContent.trim() : '';
       const resume = resumeEl ? resumeEl.textContent.trim() : '';
-
+      
+      // Conversion date
       let isoDate = '';
       if (dateText) {
-        // Supposé format "DD/MM/YYYY HH:mm"
         const parts = dateText.split(' ');
         if (parts.length === 2) {
           const dateParts = parts[0].split('/');
@@ -62,9 +58,8 @@ async function scrapeCreusotInfos() {
           }
         }
       }
-      
-      // On ajoute l'article uniquement si toutes les infos essentielles sont présentes
-      if (title && link && image && isoDate && resume && title.length > 10) {
+
+      if (title && link && image && isoDate && resume) {
         results.push({
           title,
           link,
@@ -75,16 +70,12 @@ async function scrapeCreusotInfos() {
         });
       }
     });
-    
     return results;
   });
-  
-  console.log(`Nombre d'articles récupérés: ${articles.length}`);
 
-  // Limiter par exemple aux 5 premiers articles (vous pouvez supprimer cette limitation si nécessaire)
-  const limitedArticles = articles.slice(0, 5);
+  console.log(`Nombre d'articles récupérés: ${articles.length}`);
   
-  await fs.promises.writeFile('data/articles.json', JSON.stringify(limitedArticles, null, 2));
+  await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
   await browser.close();
   console.log("✅ Scraping terminé.");
 }
