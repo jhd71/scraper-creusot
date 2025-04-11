@@ -2,53 +2,54 @@ const puppeteer = require('puppeteer');
 const fs = require('fs');
 
 async function scrapeCreusotInfos() {
-  // Lance Puppeteer en mode headless (pour GitHub Actions, par exemple)
   const browser = await puppeteer.launch({
-    headless: true,
+    headless: true, // pour GitHub Actions
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
   const page = await browser.newPage();
-  // Charger la page de listing des articles
   const listingUrl = 'https://www.creusot-infos.com/news/faits-divers/';
   await page.goto(listingUrl, {
     waitUntil: 'networkidle2',
     timeout: 30000
   });
 
-  // Optionnel : Attendre quelques secondes si le contenu est chargé dynamiquement
+  // Optionnel : attendre un peu pour s'assurer que le contenu s'affiche (si chargé dynamiquement)
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Vérifier si le contenu du listing est bien chargé (débug possible)
+  // Pour déboguer, vous pouvez sauvegarder le HTML du listing
   // const content = await page.content();
   // await fs.promises.writeFile('debug_listing.html', content);
 
-  // Extraction des articles depuis la page de listing
+  // Extraction des données de chaque article à partir des éléments spécifiques
   const articles = await page.evaluate(() => {
     const results = [];
-    // On part du principe que chaque article possède un titre avec la classe "newsListTitle".
-    // Nous utilisons ce sélecteur pour récupérer tous les titres et ensuite leurs conteneurs.
-    const titleElements = Array.from(document.querySelectorAll('.newsListItem .newsListTitle'));
+    // Sélectionner tous les éléments qui contiennent le titre de l'article
+    const titleElements = Array.from(document.querySelectorAll('.newsListTitle'));
     
     titleElements.forEach(titleEl => {
-      // On prend le conteneur parent (à adapter si nécessaire, par ex. avec .closest('.newsListItem'))
-      const container = titleEl.parentElement;
+      // Essayez de trouver un conteneur parent commun (par exemple, un élément englobant l'article)
+      // Adaptez ce sélecteur si la structure HTML du listing a un conteneur dédié (ex: ".newsListItem")
+      let container = titleEl.closest('.newsListItem');
+      if (!container) {
+        container = titleEl.parentElement;
+      }
+      
+      // Titre et lien
       const title = titleEl.textContent.trim();
-
-      // Récupérer le lien depuis une balise <a> contenue dans le container
       const linkEl = container.querySelector('a');
       const link = linkEl ? linkEl.href : document.location.href;
       
-      // Récupérer l'image depuis la balise <img> (si présente)
+      // Image (si présente dans le conteneur)
       const imageEl = container.querySelector('img');
       const image = imageEl ? imageEl.src : '';
-
-      // Récupérer la date de publication depuis l'élément ayant la classe "newsListPubli"
+      
+      // Date depuis l'élément avec la classe "newsListPubli"
       const dateEl = container.querySelector('.newsListPubli');
       const dateText = dateEl ? dateEl.textContent.trim() : '';
       let isoDate = '';
       if (dateText) {
-        // Le format attendu est "DD/MM/YYYY HH:mm", par exemple "10/04/2025 16:26"
+        // Supposé au format "DD/MM/YYYY HH:mm" par exemple "10/04/2025 16:26"
         const parts = dateText.split(' ');
         if (parts.length === 2) {
           const dateParts = parts[0].split('/');
@@ -57,19 +58,19 @@ async function scrapeCreusotInfos() {
           }
         }
       }
-
-      // Récupérer le résumé depuis l'élément avec la classe "newsListResume"
+      
+      // Résumé de l'article
       const resumeEl = container.querySelector('.newsListResume');
-      const resume = resumeEl ? resumeEl.textContent.trim() : '';
-
-      // On ajoute l'article uniquement si toutes les informations essentielles sont présentes
-      if (title && link && image && isoDate && resume) {
+      const summary = resumeEl ? resumeEl.textContent.trim() : '';
+      
+      // On n'ajoute l'article que si toutes les informations essentielles sont présentes
+      if (title && link && image && isoDate && summary && title.length > 10) {
         results.push({
           title,
           link,
           image,
           date: isoDate,
-          summary: resume,
+          summary,
           source: 'Creusot Infos'
         });
       }
@@ -78,10 +79,8 @@ async function scrapeCreusotInfos() {
     return results;
   });
 
-  // Optionnel : Log du nombre d'articles trouvés pour debug
-  console.log(`Nombre d'articles récupérés: ${articles.length}`);
+  console.log(`Nombre d'articles récupérés : ${articles.length}`);
 
-  // Sauvegarder le résultat dans le fichier JSON
   await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
   await browser.close();
   console.log("✅ Scraping terminé.");
