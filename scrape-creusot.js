@@ -2,104 +2,89 @@ const puppeteer = require('puppeteer');
 const fs = require('fs');
 
 async function scrapeCreusotInfos() {
+  // Lance Puppeteer en mode headless (pour GitHub Actions, par exemple)
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
-  
+
   const page = await browser.newPage();
+  // Charger la page de listing des articles
   const listingUrl = 'https://www.creusot-infos.com/news/faits-divers/';
-  
-  // Charger la page de listing
   await page.goto(listingUrl, {
     waitUntil: 'networkidle2',
     timeout: 30000
   });
-  
-  // Optionnel : Sauvegarder le contenu pour inspection
-  // const listingContent = await page.content();
-  // await fs.promises.writeFile('debug_listing.html', listingContent);
 
-  // Adapter ce sélecteur en fonction de la structure réelle de la page de listing
-  const articleLinks = await page.evaluate(() => {
-    const links = [];
-    // Par exemple, si les articles sont dans des div avec la classe "newsBlock"
-    const items = document.querySelectorAll('.newsBlock');
-    items.forEach(item => {
-      const linkEl = item.querySelector('a');
-      if (linkEl && linkEl.href) {
-        links.push(linkEl.href);
-      }
-    });
-    return links;
-  });
-  
-  console.log(`Nombre d'articles trouvés : ${articleLinks.length}`);
-  
-  if (!articleLinks.length) {
-    console.error("Aucun lien d'article n'a été trouvé sur le listing.");
-    await browser.close();
-    return;
-  }
-  
-  // Limiter par exemple aux 5 premiers articles
-  const linksToScrape = articleLinks.slice(0, 5);
-  const results = [];
-  
-  // Pour chaque lien, ouvrir la page d'article et extraire les données
-  for (const url of linksToScrape) {
-    const articlePage = await browser.newPage();
-    try {
-      await articlePage.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-      // Attendre quelques secondes si nécessaire (puisque le contenu peut être chargé dynamiquement)
-      await new Promise(resolve => setTimeout(resolve, 5000));
+  // Optionnel : Attendre quelques secondes si le contenu est chargé dynamiquement
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  // Vérifier si le contenu du listing est bien chargé (débug possible)
+  // const content = await page.content();
+  // await fs.promises.writeFile('debug_listing.html', content);
+
+  // Extraction des articles depuis la page de listing
+  const articles = await page.evaluate(() => {
+    const results = [];
+    // On part du principe que chaque article possède un titre avec la classe "newsListTitle".
+    // Nous utilisons ce sélecteur pour récupérer tous les titres et ensuite leurs conteneurs.
+    const titleElements = Array.from(document.querySelectorAll('.newsListTitle'));
+    
+    titleElements.forEach(titleEl => {
+      // On prend le conteneur parent (à adapter si nécessaire, par ex. avec .closest('.newsListItem'))
+      const container = titleEl.parentElement;
+      const title = titleEl.textContent.trim();
+
+      // Récupérer le lien depuis une balise <a> contenue dans le container
+      const linkEl = container.querySelector('a');
+      const link = linkEl ? linkEl.href : document.location.href;
       
-      await articlePage.waitForSelector('div.newsFullPubli', { timeout: 30000 });
-      const articleData = await articlePage.evaluate(() => {
-        // Sélecteurs pour extraire les données
-        const titleEl = document.querySelector('.newsFullTitle');
-        const imageEl = document.querySelector('img.newsFullImg');
-        const dateEl = document.querySelector('div.newsFullPubli');
-        const canonicalLink = document.querySelector('link[rel="canonical"]');
-        const link = canonicalLink ? canonicalLink.href : document.location.href;
-        
-        const title = titleEl ? titleEl.textContent.trim() : '';
-        const image = imageEl ? imageEl.src : '';
-        const dateText = dateEl ? dateEl.textContent.trim() : '';
-        let isoDate = '';
-        if (dateText) {
-          const parts = dateText.split(' ');
-          if (parts.length === 2) {
-            const dateParts = parts[0].split('/');
-            if (dateParts.length === 3) {
-              isoDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T${parts[1]}:00`;
-            }
+      // Récupérer l'image depuis la balise <img> (si présente)
+      const imageEl = container.querySelector('img');
+      const image = imageEl ? imageEl.src : '';
+
+      // Récupérer la date de publication depuis l'élément ayant la classe "newsListPubli"
+      const dateEl = container.querySelector('.newsListPubli');
+      const dateText = dateEl ? dateEl.textContent.trim() : '';
+      let isoDate = '';
+      if (dateText) {
+        // Le format attendu est "DD/MM/YYYY HH:mm", par exemple "10/04/2025 16:26"
+        const parts = dateText.split(' ');
+        if (parts.length === 2) {
+          const dateParts = parts[0].split('/');
+          if (dateParts.length === 3) {
+            isoDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T${parts[1]}:00`;
           }
         }
-        return {
+      }
+
+      // Récupérer le résumé depuis l'élément avec la classe "newsListResume"
+      const resumeEl = container.querySelector('.newsListResume');
+      const resume = resumeEl ? resumeEl.textContent.trim() : '';
+
+      // On ajoute l'article uniquement si toutes les informations essentielles sont présentes
+      if (title && link && image && isoDate && resume) {
+        results.push({
           title,
           link,
           image,
           date: isoDate,
+          summary: resume,
           source: 'Creusot Infos'
-        };
-      });
-      
-      if (articleData.title && articleData.date) {
-        results.push(articleData);
-      } else {
-        console.warn("Données incomplètes pour l'article :", url);
+        });
       }
-      await articlePage.close();
-    } catch (err) {
-      console.error(`Erreur lors de l'extraction pour ${url}:`, err);
-      await articlePage.close();
-    }
-  }
-  
-  await fs.promises.writeFile('data/articles.json', JSON.stringify(results, null, 2));
+    });
+    
+    return results;
+  });
+
+  // Optionnel : Log du nombre d'articles trouvés pour debug
+  console.log(`Nombre d'articles récupérés: ${articles.length}`);
+
+  // Sauvegarder le résultat dans le fichier JSON
+  await fs.promises.writeFile('data/articles.json', JSON.stringify(articles, null, 2));
   await browser.close();
-  console.log("✅ Scraping terminé. Articles extraits :", results.length);
+  console.log("✅ Scraping terminé.");
 }
 
 scrapeCreusotInfos().then(() => {
