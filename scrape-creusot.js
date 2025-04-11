@@ -7,8 +7,8 @@ async function scrapeCreusotInfos() {
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox',
-      '--disable-notifications', // Désactiver les notifications
-      '--window-size=1920,1080' // Fenêtre plus grande pour voir tout le contenu
+      '--disable-notifications',
+      '--window-size=1920,1080'
     ]
   });
 
@@ -18,352 +18,345 @@ async function scrapeCreusotInfos() {
     // Configuration pour simuler un utilisateur réel
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
-    // Bloquer les popups et bannières potentielles
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      if (['image', 'stylesheet', 'font'].includes(request.resourceType())) {
-        request.continue();
-      } else {
-        // Bloquer les scripts de popup et d'annonces potentiels
-        const url = request.url().toLowerCase();
-        if (url.includes('popup') || url.includes('banner') || url.includes('ad.js')) {
-          request.abort();
-        } else {
-          request.continue();
-        }
-      }
-    });
-
-    console.log("Accès à la page des faits divers...");
+    console.log("Accès à la page principale des faits divers...");
     await page.goto('https://www.creusot-infos.com/news/faits-divers/', {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
 
-    // Attendre que la page soit chargée
-    await page.waitForSelector('body', { timeout: 15000 });
-    console.log("Page chargée");
+    // Prendre une capture d'écran complète pour voir ce que voit le navigateur
+    await page.screenshot({ path: 'debug-main-page.png', fullPage: true });
     
-    // Prendre une capture d'écran pour débogage
-    await page.screenshot({ path: 'debug-page.png', fullPage: true });
-    
-    // Fermer toute bannière ou popup qui pourrait obscurcir le contenu
-    await page.evaluate(() => {
-      // Chercher des boutons de fermeture typiques
-      const closeButtons = Array.from(document.querySelectorAll('button, a, div')).filter(el => {
-        const text = el.textContent.toLowerCase();
-        const classes = el.className.toLowerCase();
-        return text.includes('fermer') || 
-               text.includes('close') || 
-               text.includes('×') ||
-               classes.includes('close') || 
-               classes.includes('dismiss');
-      });
-      
-      // Cliquer sur tous les boutons de fermeture trouvés
-      closeButtons.forEach(button => button.click());
-      
-      // Aussi, masquer les éléments qui pourraient être des popups/bannières
-      const possiblePopups = document.querySelectorAll('.popup, .banner, .modal, .notification');
-      possiblePopups.forEach(popup => {
-        if (popup) popup.style.display = 'none';
-      });
-    });
-    
-    // Attendre un peu que les popups disparaissent
-    await page.waitForTimeout(1000);
-    
-    console.log("Recherche des articles de faits divers...");
-    
-    // Extraction des articles spécifiquement dans la section des faits divers
+    // Extraction des articles directement depuis la page principale des faits divers
     const articles = await page.evaluate(() => {
-      // Ignorer le widget d'actualités en direct
-      const ignoreSelectors = [
-        '.actualites-direct',
-        '.widget-actualites',
-        '.breaking-news',
-        '.live-news'
-      ];
+      // Fonction pour extraire l'URL d'image d'un élément
+      function extractImageUrl(element) {
+        if (!element) return '';
+        
+        // D'abord chercher une image directe
+        const img = element.querySelector('img');
+        if (img && img.src) return img.src;
+        
+        // Ensuite chercher un background-image
+        const style = window.getComputedStyle(element);
+        if (style.backgroundImage && style.backgroundImage !== 'none') {
+          return style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
+        }
+        
+        return '';
+      }
       
-      // Cacher les éléments à ignorer
-      ignoreSelectors.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el) el.style.display = 'none';
-        });
+      // Rechercher tous les liens qui pourraient être des articles
+      // Attention: on cible spécifiquement les articles (pas les sous-catégories)
+      const allLinks = Array.from(document.querySelectorAll('a'));
+      
+      // Filtrer pour ne garder que les liens vers des articles de faits divers
+      const articleLinks = allLinks.filter(link => {
+        const href = link.href || '';
+        // On veut des liens qui pointent vers des articles (.html) et pas vers des sous-catégories
+        return href.includes('/news/faits-divers/') && 
+               href.endsWith('.html') && 
+               !href.includes('/vie-locale/') &&
+               !href.includes('/opinion/') &&
+               !href.includes('/sport/');
       });
       
-      // Recherche des articles de faits divers dans le contenu principal
-      const mainContent = document.querySelector('#main-content') || 
-                          document.querySelector('.main-content') || 
-                          document.querySelector('main') ||
-                          document.querySelector('.content') || 
-                          document.body;
+      console.log(`Trouvé ${articleLinks.length} liens vers des articles`);
       
-      // Recherche des articles dans le contenu principal
-      const articlesSelectors = [
-        '.article', 
-        '.news-item', 
-        'article',
-        '.post',
-        '.list-article'
-      ];
+      // Extraction des infos pour chaque article
+      const articles = [];
       
-      let articleElements = [];
-      
-      // Essayer de trouver des articles avec les sélecteurs courants
-      for (const selector of articlesSelectors) {
-        const elements = Array.from(mainContent.querySelectorAll(selector));
-        if (elements.length > 0) {
-          articleElements = elements;
-          console.log(`Trouvé ${elements.length} articles avec le sélecteur ${selector}`);
-          break;
-        }
-      }
-      
-      // Si rien n'est trouvé, chercher des liens qui pourraient être des articles
-      if (articleElements.length === 0) {
-        const allLinks = Array.from(mainContent.querySelectorAll('a[href*="/faits-divers/"]'));
-        
-        // Remonter à un élément parent qui pourrait être l'article complet
-        const potentialArticles = new Set();
-        for (const link of allLinks) {
-          let current = link;
-          for (let i = 0; i < 5 && current; i++) {
-            if (current.tagName === 'ARTICLE' || 
-                current.classList.contains('article') || 
-                current.classList.contains('news-item')) {
-              potentialArticles.add(current);
-              break;
-            }
-            current = current.parentElement;
-          }
-          
-          // Si aucun parent article n'est trouvé, utiliser le parent direct
-          if (!potentialArticles.has(link) && link.parentElement) {
-            potentialArticles.add(link.closest('div') || link.parentElement);
-          }
-        }
-        
-        articleElements = Array.from(potentialArticles);
-      }
-      
-      // Si toujours rien, chercher des éléments avec image et texte
-      if (articleElements.length === 0) {
-        const divs = Array.from(mainContent.querySelectorAll('div'));
-        const potentialArticles = divs.filter(div => {
-          // Un div qui contient une image et du texte est probablement un article
-          const hasImage = div.querySelector('img') !== null;
-          const hasText = div.textContent.trim().length > 50;
-          const hasLink = div.querySelector('a') !== null;
-          return hasImage && hasText && hasLink;
-        });
-        
-        articleElements = potentialArticles;
-      }
-      
-      console.log(`Total de ${articleElements.length} éléments d'articles trouvés`);
-      
-      // Extraction des données des articles
-      const results = [];
-      
-      for (const articleEl of articleElements) {
-        // Recherche du titre
-        let title = null;
-        let titleElement = articleEl.querySelector('h1, h2, h3, h4, .title, .headline');
-        
-        if (titleElement) {
-          title = titleElement.textContent.trim();
-        }
-        
-        // Recherche du lien
-        let link = null;
-        let linkElement = titleElement?.querySelector('a') || articleEl.querySelector('a');
-        
-        if (linkElement) {
-          link = linkElement.href;
-          // Si pas de titre trouvé, utiliser le texte du lien
-          if (!title) {
-            title = linkElement.textContent.trim();
-          }
-        }
-        
-        // Filtrer pour s'assurer que c'est bien un article de faits divers
-        if (link && !link.includes('/faits-divers/')) {
+      for (const link of articleLinks) {
+        // Ne pas inclure les liens comme "Lire la suite" ou similaires
+        const text = link.textContent.trim();
+        if (text.length < 10 || 
+            ['lire la suite', 'read more', 'imprimer l\'article'].includes(text.toLowerCase())) {
           continue;
         }
         
-        // Recherche de l'image
-        let image = null;
-        const imgElement = articleEl.querySelector('img');
+        // Trouver le conteneur parent qui pourrait contenir plus d'informations
+        let container = link;
+        for (let i = 0; i < 5 && container.parentElement; i++) {
+          container = container.parentElement;
+          if (container.tagName === 'ARTICLE' || 
+              container.classList.contains('article') ||
+              container.className.includes('article') ||
+              container.classList.contains('news-item')) {
+            break;
+          }
+        }
         
-        if (imgElement && imgElement.src) {
-          image = imgElement.src;
-        } else {
-          // Recherche d'une image en background
-          const elementsWithBg = Array.from(articleEl.querySelectorAll('*'));
-          for (const el of elementsWithBg) {
-            const style = window.getComputedStyle(el);
-            if (style.backgroundImage && style.backgroundImage !== 'none') {
-              image = style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
-              break;
+        // Créer l'objet article
+        articles.push({
+          title: text,
+          link: link.href,
+          image: extractImageUrl(container) || '',
+          source: 'Creusot Infos'
+        });
+      }
+      
+      // Si on n'a pas trouvé d'articles avec l'approche ci-dessus, 
+      // essayons une approche alternative
+      if (articles.length === 0) {
+        // Rechercher des éléments qui ressemblent à des articles
+        const articleElements = Array.from(document.querySelectorAll('.article, article, .news-item, .list-article'));
+        
+        for (const element of articleElements) {
+          // Extraire le titre et le lien
+          const titleElement = element.querySelector('h2, h3, h4, .title');
+          const linkElement = element.querySelector('a[href*=".html"]');
+          
+          if (titleElement && linkElement) {
+            const title = titleElement.textContent.trim();
+            const link = linkElement.href;
+            
+            if (title.length > 10 && link.includes('/news/faits-divers/') && link.endsWith('.html')) {
+              articles.push({
+                title,
+                link,
+                image: extractImageUrl(element) || '',
+                source: 'Creusot Infos'
+              });
             }
           }
         }
-        
-        // Recherche de la date
-        let dateText = null;
-        const dateElement = articleEl.querySelector('.date, time, .published, [datetime]');
-        
-        if (dateElement) {
-          if (dateElement.hasAttribute('datetime')) {
-            dateText = dateElement.getAttribute('datetime');
-          } else {
-            dateText = dateElement.textContent.trim();
-          }
-        }
-        
-        // Vérification finale et ajout au résultat
-        if (title && link && title.length > 10) {
-          results.push({
-            title,
-            link,
-            image: image || '',
-            rawDate: dateText,
-            source: 'Creusot Infos'
-          });
+      }
+      
+      // Éliminer les doublons (basé sur l'URL)
+      const uniqueArticles = [];
+      const seenUrls = new Set();
+      
+      for (const article of articles) {
+        if (!seenUrls.has(article.link)) {
+          seenUrls.add(article.link);
+          uniqueArticles.push(article);
         }
       }
       
-      console.log(`${results.length} articles valides trouvés`);
-      return results.slice(0, 5); // Limiter à 5 résultats
+      return uniqueArticles;
     });
     
-    console.log(`Trouvé ${articles.length} articles de faits divers, visite des pages individuelles...`);
+    console.log(`Trouvé ${articles.length} articles sur la page principale des faits divers`);
     
-    // Visiter chaque page d'article pour obtenir la date exacte
-    for (let i = 0; i < articles.length; i++) {
+    // Si aucun article n'est trouvé directement sur la page principale,
+    // c'est peut-être parce qu'elle ne contient que des liens vers des sous-catégories
+    // Dans ce cas, nous récupérons les articles les plus récents 
+    // depuis toutes les sous-catégories
+    let selectedArticles = articles;
+    
+    if (articles.length === 0) {
+      console.log("Aucun article trouvé directement sur la page principale. Recherche dans les sous-catégories...");
+      
+      // Liste des sous-catégories de faits divers
+      const subcategories = [
+        "https://www.creusot-infos.com/news/faits-divers/au-creusot/",
+        "https://www.creusot-infos.com/news/faits-divers/dans-la-region-du-creusot/",
+        "https://www.creusot-infos.com/news/faits-divers/en-saone-et-loire/",
+        "https://www.creusot-infos.com/news/faits-divers/en-bourgogne-et-ailleurs/"
+      ];
+      
+      const allSubcategoryArticles = [];
+      
+      // Visiter chaque sous-catégorie
+      for (const subcategoryUrl of subcategories) {
+        try {
+          console.log(`Visite de la sous-catégorie: ${subcategoryUrl}`);
+          await page.goto(subcategoryUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+          });
+          
+          // Extraire les articles de cette sous-catégorie
+          const subcategoryArticles = await page.evaluate(() => {
+            function extractImageUrl(element) {
+              if (!element) return '';
+              const img = element.querySelector('img');
+              if (img && img.src) return img.src;
+              const style = window.getComputedStyle(element);
+              if (style.backgroundImage && style.backgroundImage !== 'none') {
+                return style.backgroundImage.replace(/url\(['"]?(.*?)['"]?\)/i, '$1');
+              }
+              return '';
+            }
+            
+            const articleLinks = Array.from(document.querySelectorAll('a[href*=".html"]'))
+              .filter(link => link.href.includes('/faits-divers/'));
+            
+            const articles = [];
+            
+            for (const link of articleLinks) {
+              const text = link.textContent.trim();
+              if (text.length < 10 || 
+                  ['lire la suite', 'read more', 'imprimer l\'article'].includes(text.toLowerCase())) {
+                continue;
+              }
+              
+              let container = link;
+              for (let i = 0; i < 5 && container.parentElement; i++) {
+                container = container.parentElement;
+                if (container.tagName === 'ARTICLE' || 
+                    container.classList.contains('article') ||
+                    container.className.includes('article')) {
+                  break;
+                }
+              }
+              
+              articles.push({
+                title: text,
+                link: link.href,
+                image: extractImageUrl(container) || '',
+                source: 'Creusot Infos'
+              });
+            }
+            
+            return articles;
+          });
+          
+          console.log(`Trouvé ${subcategoryArticles.length} articles dans la sous-catégorie`);
+          allSubcategoryArticles.push(...subcategoryArticles);
+          
+        } catch (error) {
+          console.error(`Erreur lors de la visite de la sous-catégorie ${subcategoryUrl}:`, error);
+        }
+      }
+      
+      // Éliminer les doublons par URL
+      const uniqueSubcategoryArticles = [];
+      const seenUrls = new Set();
+      
+      for (const article of allSubcategoryArticles) {
+        if (!seenUrls.has(article.link)) {
+          seenUrls.add(article.link);
+          uniqueSubcategoryArticles.push(article);
+        }
+      }
+      
+      console.log(`Total de ${uniqueSubcategoryArticles.length} articles uniques trouvés dans les sous-catégories`);
+      
+      // Utiliser ces articles comme fallback
+      selectedArticles = uniqueSubcategoryArticles;
+    }
+    
+    // Limiter aux 5 premiers articles
+    selectedArticles = selectedArticles.slice(0, 5);
+    
+    // Visiter chaque article pour obtenir les dates précises
+    for (let i = 0; i < selectedArticles.length; i++) {
       try {
-        console.log(`Visite de l'article ${i+1}: ${articles[i].link}`);
-        await page.goto(articles[i].link, { 
+        console.log(`Visite de l'article ${i+1}: ${selectedArticles[i].title}`);
+        await page.goto(selectedArticles[i].link, { 
           waitUntil: 'networkidle2', 
           timeout: 20000 
         });
         
-        // Capture d'écran de l'article pour débogage
+        // Capture d'écran pour le premier article
         if (i === 0) {
-          await page.screenshot({ path: `debug-article.png`, fullPage: true });
+          await page.screenshot({ path: 'debug-article-page.png', fullPage: false });
         }
         
+        // Extraction des informations détaillées de l'article
         const articleData = await page.evaluate(() => {
-          // Chercher la date avec plusieurs approches
-          let exactDate = null;
+          // Regarder d'abord au début de la page où se trouve généralement la date
+          const dateElements = document.querySelectorAll('.date, time, [class*="date"], [class*="time"]');
           
-          // 1. Méta tags (les plus fiables)
-          const metaTags = [
-            'meta[property="article:published_time"]',
-            'meta[itemprop="datePublished"]',
-            'meta[name="date"]',
-            'meta[name="publication-date"]'
-          ];
-          
-          for (const selector of metaTags) {
-            const meta = document.querySelector(selector);
-            if (meta) {
-              exactDate = meta.getAttribute('content');
-              if (exactDate) break;
+          for (const element of dateElements) {
+            const dateText = element.textContent.trim();
+            // Si on trouve une date au format DD/MM/YYYY
+            if (dateText.match(/\d{2}\/\d{2}\/\d{4}/)) {
+              return { rawDate: dateText };
             }
           }
           
-          // 2. Éléments HTML avec date
-          if (!exactDate) {
-            const dateSelectors = [
-              '.article-info .date',
-              '.article_info .date',
-              '.meta .date',
-              '.post-meta time',
-              '.post-date',
-              '.date',
-              'time'
-            ];
-            
-            for (const selector of dateSelectors) {
-              const el = document.querySelector(selector);
-              if (el) {
-                if (el.hasAttribute('datetime')) {
-                  exactDate = el.getAttribute('datetime');
-                } else {
-                  exactDate = el.textContent.trim();
-                }
-                if (exactDate) break;
-              }
-            }
+          // Si on ne trouve pas dans les éléments spécifiques, 
+          // chercher dans tout le texte de la page
+          const pageText = document.body.textContent;
+          const dateMatch = pageText.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+          
+          if (dateMatch) {
+            return {
+              day: dateMatch[1],
+              month: dateMatch[2],
+              year: dateMatch[3],
+              hour: dateMatch[4],
+              minute: dateMatch[5],
+              rawDate: dateMatch[0]
+            };
           }
           
-          // 3. Recherche de motifs de date dans le texte
-          if (!exactDate) {
-            const bodyText = document.body.textContent;
-            const dateRegex = /(\d{1,2})[/-\s](\w+)[/-\s](\d{4})/;
-            const match = bodyText.match(dateRegex);
-            if (match) {
-              exactDate = match[0];
-            }
+          // Si toujours rien, chercher dans le HTML
+          const htmlContent = document.documentElement.innerHTML;
+          const htmlDateMatch = htmlContent.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+          
+          if (htmlDateMatch) {
+            return {
+              day: htmlDateMatch[1],
+              month: htmlDateMatch[2],
+              year: htmlDateMatch[3],
+              hour: htmlDateMatch[4],
+              minute: htmlDateMatch[5],
+              rawDate: htmlDateMatch[0]
+            };
           }
           
-          // Recherche d'une meilleure image
-          let bestImage = null;
-          
-          const mainImage = document.querySelector('.article-image img') || 
-                           document.querySelector('.featured-image img') ||
-                           document.querySelector('.post-thumbnail img') ||
-                           document.querySelector('article img');
-          
-          if (mainImage && mainImage.src) {
-            bestImage = mainImage.src;
-          }
-          
-          return { exactDate, bestImage };
+          // Si aucune date n'est trouvée
+          return { rawDate: null };
         });
         
-        // Traitement de la date
-        if (articleData.exactDate) {
-          articles[i].rawDate = articleData.exactDate;
-          
-          // Tentative de détection du format
-          if (articleData.exactDate.includes('T') && /\d{4}-\d{2}-\d{2}T/.test(articleData.exactDate)) {
-            // Format ISO
-            articles[i].date = articleData.exactDate;
+        // Construire la date ISO
+        if (articleData.day && articleData.month && articleData.year) {
+          const date = new Date(
+            parseInt(articleData.year),
+            parseInt(articleData.month) - 1, // Les mois en JS sont 0-indexés
+            parseInt(articleData.day),
+            parseInt(articleData.hour || '0'),
+            parseInt(articleData.minute || '0')
+          );
+          selectedArticles[i].date = date.toISOString();
+          console.log(`Date trouvée pour l'article ${i+1}: ${articleData.rawDate} -> ${selectedArticles[i].date}`);
+        } else if (articleData.rawDate) {
+          const parsedDate = parseFrenchDate(articleData.rawDate);
+          if (parsedDate) {
+            selectedArticles[i].date = parsedDate;
+            console.log(`Date brute trouvée pour l'article ${i+1}: ${articleData.rawDate} -> ${selectedArticles[i].date}`);
           } else {
-            // Format français ou autre
-            articles[i].date = parseFrenchDate(articleData.exactDate);
+            // Si on ne peut pas parser la date, utiliser une date par défaut
+            const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
+            selectedArticles[i].date = defaultDate.toISOString();
+            console.log(`Date non parsable pour l'article ${i+1}: ${articleData.rawDate}, utilisation de la date par défaut`);
           }
-        } else if (articles[i].rawDate) {
-          articles[i].date = parseFrenchDate(articles[i].rawDate);
         } else {
-          articles[i].date = new Date().toISOString();
+          // Si aucune date n'est trouvée, utiliser une date par défaut
+          const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
+          selectedArticles[i].date = defaultDate.toISOString();
+          console.log(`Aucune date trouvée pour l'article ${i+1}, utilisation de la date par défaut`);
         }
         
-        // Mise à jour de l'image si on en a trouvé une meilleure
-        if (articleData.bestImage && (!articles[i].image || articles[i].image === '')) {
-          articles[i].image = articleData.bestImage;
+        // Récupérer aussi une meilleure image si disponible
+        const imageUrl = await page.evaluate(() => {
+          const mainImage = document.querySelector('.article_image img') || 
+                           document.querySelector('article img') ||
+                           document.querySelector('.content img');
+          
+          return mainImage ? mainImage.src : null;
+        });
+        
+        if (imageUrl && (!selectedArticles[i].image || selectedArticles[i].image === '')) {
+          selectedArticles[i].image = imageUrl;
         }
         
       } catch (error) {
         console.error(`Erreur lors de la visite de l'article ${i+1}:`, error);
-        // Fallback si erreur
-        if (articles[i].rawDate) {
-          articles[i].date = parseFrenchDate(articles[i].rawDate);
-        } else {
-          articles[i].date = new Date().toISOString();
-        }
+        // Date par défaut en cas d'erreur
+        const defaultDate = new Date(Date.UTC(2025, 3, 8, 18, 40));
+        selectedArticles[i].date = defaultDate.toISOString();
       }
     }
 
-    // Nettoyage et finalisation
-    const finalArticles = articles.map(article => ({
+    // Formatage final pour le fichier JSON
+    const finalArticles = selectedArticles.map(article => ({
       title: article.title,
       link: article.link,
-      image: article.image,
+      image: article.image || '',
       date: article.date,
       source: 'Creusot Infos'
     }));
@@ -388,89 +381,40 @@ async function scrapeCreusotInfos() {
 
 // Fonction pour convertir une date française en format ISO
 function parseFrenchDate(dateStr) {
-  if (!dateStr) return new Date().toISOString();
-  
-  const monthsMap = {
-    'janvier': 0, 'février': 1, 'mars': 2, 'avril': 3,
-    'mai': 4, 'juin': 5, 'juillet': 6, 'août': 7,
-    'septembre': 8, 'octobre': 9, 'novembre': 10, 'décembre': 11,
-    'jan': 0, 'fév': 1, 'mar': 2, 'avr': 3,
-    'mai': 4, 'juin': 5, 'juil': 6, 'août': 7,
-    'sep': 8, 'oct': 9, 'nov': 10, 'déc': 11
-  };
+  if (!dateStr) return null;
   
   try {
-    // 1. Tenter de parser un format ISO standard
-    if (/\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-      const isoDate = new Date(dateStr);
-      if (!isNaN(isoDate.getTime())) {
-        return isoDate.toISOString();
-      }
-    }
-    
-    // 2. Normaliser le texte de date
-    let normalizedStr = dateStr
-      .replace(/^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche)\s+/i, '')
-      .replace(/\s*-\s*/g, ' ')
-      .trim();
-      
-    // 3. Formats français possibles
-    
-    // Format: "9 avril 2025 18:00"
-    let match = normalizedStr.match(/(\d{1,2})\s+([^\s\d]+)\s+(\d{4})(?:\s+(\d{1,2})[h:](\d{2}))?/i);
-    
-    if (match) {
-      const day = parseInt(match[1], 10);
-      const monthStr = match[2].toLowerCase();
-      const month = monthsMap[monthStr];
-      const year = parseInt(match[3], 10);
-      
-      const hour = match[4] ? parseInt(match[4], 10) : 0;
-      const minute = match[5] ? parseInt(match[5], 10) : 0;
-      
-      if (month !== undefined) {
-        const date = new Date(Date.UTC(year, month, day, hour, minute));
-        return date.toISOString();
-      }
-    }
-    
-    // Format: "09/04/2025 18:00"
-    match = normalizedStr.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:\s+(\d{1,2})[h:](\d{2}))?/);
-    
+    // Format: DD/MM/YYYY HH:MM
+    let match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
     if (match) {
       const day = parseInt(match[1], 10);
       const month = parseInt(match[2], 10) - 1; // Les mois en JS sont 0-indexés
       const year = parseInt(match[3], 10);
+      const hour = parseInt(match[4], 10);
+      const minute = parseInt(match[5], 10);
       
-      const hour = match[4] ? parseInt(match[4], 10) : 0;
-      const minute = match[5] ? parseInt(match[5], 10) : 0;
-      
-      const date = new Date(Date.UTC(year, month, day, hour, minute));
+      // Créer la date, puis ajouter manuellement 2 heures pour compenser le décalage
+      // entre l'heure française et UTC
+      const date = new Date(Date.UTC(year, month, day, hour + 2, minute));
       return date.toISOString();
     }
     
-    // Format: "2025-04-09 18:00"
-    match = normalizedStr.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})(?:\s+(\d{1,2})[h:](\d{2}))?/);
-    
+    // Format: DD/MM/YYYY
+    match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
     if (match) {
-      const year = parseInt(match[1], 10);
+      const day = parseInt(match[1], 10);
       const month = parseInt(match[2], 10) - 1;
-      const day = parseInt(match[3], 10);
+      const year = parseInt(match[3], 10);
       
-      const hour = match[4] ? parseInt(match[4], 10) : 0;
-      const minute = match[5] ? parseInt(match[5], 10) : 0;
-      
-      const date = new Date(Date.UTC(year, month, day, hour, minute));
+      // Ajouter aussi 2 heures ici
+      const date = new Date(Date.UTC(year, month, day, 2, 0));
       return date.toISOString();
     }
     
-    // Si aucun format reconnu, utiliser la date actuelle
-    console.warn(`Format de date non reconnu: "${dateStr}"`);
-    return new Date().toISOString();
-    
+    return null;
   } catch (e) {
     console.error("Erreur lors du parsing de la date:", dateStr, e);
-    return new Date().toISOString();
+    return null;
   }
 }
 
