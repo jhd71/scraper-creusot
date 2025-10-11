@@ -286,10 +286,33 @@ const articleData = await page.evaluate(() => {
     }
   }
   
-  // Chercher la meilleure image
-  const mainImage = document.querySelector('.article_image img') || 
-                   document.querySelector('article img') ||
-                   document.querySelector('.content img');
+  // Chercher la meilleure image (en excluant les logos et publicités)
+  let mainImage = null;
+  
+  // Essayer différents sélecteurs dans l'ordre de priorité
+  const imageSelectors = [
+    '.article_image img',
+    'article .featured-image img',
+    'article .post-thumbnail img',
+    '.entry-content img:first-of-type',
+    'article img[src*="creusot-infos.com"]',
+    '.content img:first-of-type',
+    'article img'
+  ];
+  
+  for (const selector of imageSelectors) {
+    const img = document.querySelector(selector);
+    if (img && img.src && 
+        !img.src.includes('logo.png') && 
+        !img.src.includes('logo.jpg') &&
+        !img.src.includes('publicite') &&
+        !img.src.includes('pub-') &&
+        img.width > 100 && // Ignorer les petites images
+        img.height > 100) {
+      mainImage = img;
+      break;
+    }
+  }
   
   return {
     rawDate: rawDateText,
