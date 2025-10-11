@@ -291,8 +291,10 @@ const articleData = await page.evaluate(() => {
   
   // Essayer différents sélecteurs dans l'ordre de priorité
   const imageSelectors = [
-    'article img[src*="bourgogne-infos.com"][src*="_full"]',  // ✅ Priorité : images full de bourgogne-infos
-    'article img[src*="bourgogne-infos.com"]',  // ✅ Puis n'importe quelle image bourgogne-infos
+    'img.shrinkToFit[src*="bourgogne-infos.com"]',  // ✅ PRIORITÉ ABSOLUE : image principale
+    'img.shrinkToFit',  // ✅ Backup si pas bourgogne-infos dans l'URL
+    'article img[src*="bourgogne-infos.com"][src*="_full"]',
+    'article img[src*="bourgogne-infos.com"]',
     'article img[src*="creusot-infos.com"]',
     '.article_image img',
     'article .featured-image img',
