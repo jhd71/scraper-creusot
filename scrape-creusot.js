@@ -312,9 +312,14 @@ if (articleData.rawDate) {
   console.log(`Aucune date trouvée pour l'article ${i+1}, utilisation de la date par défaut`);
 }
 
-// Mise à jour de l'image
-if (articleData.mainImage && (!selectedArticles[i].image || selectedArticles[i].image === '')) {
+// Mise à jour de l'image - TOUJOURS utiliser l'image de la page article si elle existe
+if (articleData.mainImage) {
   selectedArticles[i].image = articleData.mainImage;
+  console.log(`✅ Image trouvée pour l'article ${i+1}: ${articleData.mainImage}`);
+} else if (!selectedArticles[i].image || selectedArticles[i].image.includes('logo.png')) {
+  // Si pas d'image sur la page article et que l'image actuelle est le logo, utiliser une chaîne vide
+  selectedArticles[i].image = '';
+  console.log(`⚠️ Aucune image trouvée pour l'article ${i+1}`);
 }
         
       } catch (error) {
