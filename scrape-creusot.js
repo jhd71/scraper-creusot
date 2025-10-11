@@ -286,37 +286,63 @@ const articleData = await page.evaluate(() => {
     }
   }
   
-  // Chercher la meilleure image (en excluant les logos et publicités)
+ // Chercher la meilleure image de l'article
   let mainImage = null;
   
   // Essayer différents sélecteurs dans l'ordre de priorité
   const imageSelectors = [
+    'article img[src*="bourgogne-infos.com"][src*="_full"]',  // ✅ Priorité : images full de bourgogne-infos
+    'article img[src*="bourgogne-infos.com"]',  // ✅ Puis n'importe quelle image bourgogne-infos
+    'article img[src*="creusot-infos.com"]',
     '.article_image img',
     'article .featured-image img',
     'article .post-thumbnail img',
     '.entry-content img:first-of-type',
-    'article img[src*="creusot-infos.com"]',
     '.content img:first-of-type',
     'article img'
   ];
   
   for (const selector of imageSelectors) {
-    const img = document.querySelector(selector);
-    if (img && img.src && 
-        !img.src.includes('logo.png') && 
-        !img.src.includes('logo.jpg') &&
-        !img.src.includes('publicite') &&
-        !img.src.includes('pub-') &&
-        img.width > 100 && // Ignorer les petites images
-        img.height > 100) {
-      mainImage = img;
-      break;
+    const imgs = Array.from(document.querySelectorAll(selector));
+    
+    for (const img of imgs) {
+      // Filtrer les mauvaises images
+      if (img && img.src && 
+          !img.src.includes('logo.png') && 
+          !img.src.includes('logo.jpg') &&
+          !img.src.includes('publicite') &&
+          !img.src.includes('pub-') &&
+          !img.src.includes('banner') &&
+          img.naturalWidth > 200 &&  // ✅ Au moins 200px de large (naturalWidth est plus fiable)
+          img.naturalHeight > 150) {  // ✅ Au moins 150px de haut
+        
+        mainImage = img;
+        break;
+      }
+    }
+    
+    if (mainImage) break;
+  }
+  
+  // ✅ Optimiser l'URL de l'image si nécessaire
+  let finalImageUrl = null;
+  if (mainImage) {
+    finalImageUrl = mainImage.src;
+    
+    // Remplacer _news.jpg par _full.jpg pour avoir la meilleure qualité
+    if (finalImageUrl.includes('_news.jpg')) {
+      finalImageUrl = finalImageUrl.replace('_news.jpg', '_full.jpg');
+    }
+    
+    // Forcer HTTPS au lieu de HTTP
+    if (finalImageUrl.startsWith('http://')) {
+      finalImageUrl = finalImageUrl.replace('http://', 'https://');
     }
   }
   
   return {
     rawDate: rawDateText,
-    mainImage: mainImage ? mainImage.src : null
+    mainImage: finalImageUrl
   };
 });
 
