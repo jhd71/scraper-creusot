@@ -289,30 +289,43 @@ const articleData = await page.evaluate(() => {
  // Chercher la meilleure image de l'article
   let mainImage = null;
   
-  // Essayer différents sélecteurs dans l'ordre de priorité
+  // ÉTAPE 1 : Isoler le conteneur de l'article principal (exclure sidebar)
+  const mainContent = document.querySelector('.contentClassicNews') || 
+                     document.querySelector('.newsFullContent') ||
+                     document.querySelector('article') ||
+                     document.querySelector('.content');
+  
+  if (!mainContent) {
+    return {
+      rawDate: rawDateText,
+      mainImage: null
+    };
+  }
+  
+  // ÉTAPE 2 : Chercher l'image UNIQUEMENT dans ce conteneur
   const imageSelectors = [
-    '.contentClassicNews img.newsFullImg[src*="bourgogne-infos.com"]',  // ✅ Seulement dans l'article principal
-    '.newsFullContent img.newsFullImg[src*="bourgogne-infos.com"]',     // ✅ Dans le contenu de l'article
-    '.contentClassicNews img.newsFullImg',                               // ✅ Backup sans filtre bourgogne-infos
-    '.newsFullContent img.newsFullImg',
-    '.contentClassicNews img[src*="bourgogne-infos.com"]',              // ✅ N'importe quelle image dans l'article
-    '.newsFullContent img[src*="bourgogne-infos.com"]',
-    'article img.newsFullImg[src*="bourgogne-infos.com"]',
-    'article img[src*="bourgogne-infos.com"][src*="_full"]',
-    'article img[src*="bourgogne-infos.com"]',
-    'article img[src*="creusot-infos.com"]',
-    '.article_image img',
-    'article .featured-image img',
-    'article .post-thumbnail img',
-    '.entry-content img:first-of-type',
-    '.content img:first-of-type',
-    'article img'
+    'img.newsFullImg[src*="bourgogne-infos.com"]',
+    'img.newsFullImg',
+    'img[src*="bourgogne-infos.com"][src*="_full"]',
+    'img[src*="bourgogne-infos.com"]',
+    'img[src*="creusot-infos.com"]',
+    'img'
   ];
   
   for (const selector of imageSelectors) {
-    const imgs = Array.from(document.querySelectorAll(selector));
+    // Chercher SEULEMENT dans mainContent (pas dans tout le document)
+    const imgs = Array.from(mainContent.querySelectorAll(selector));
     
     for (const img of imgs) {
+      // Vérifier que l'image n'est PAS dans la sidebar
+      const isInSidebar = img.closest('.contentClassicRight') || 
+                         img.closest('.sidebar') ||
+                         img.closest('.adsunderNews');
+      
+      if (isInSidebar) {
+        continue; // Ignorer les images de la sidebar
+      }
+      
       // Filtrer les mauvaises images
       if (img && img.src && 
           !img.src.includes('logo.png') && 
@@ -320,8 +333,8 @@ const articleData = await page.evaluate(() => {
           !img.src.includes('publicite') &&
           !img.src.includes('pub-') &&
           !img.src.includes('banner') &&
-          img.naturalWidth > 200 &&  // ✅ Au moins 200px de large (naturalWidth est plus fiable)
-          img.naturalHeight > 150) {  // ✅ Au moins 150px de haut
+          img.naturalWidth > 200 &&
+          img.naturalHeight > 150) {
         
         mainImage = img;
         break;
@@ -331,17 +344,17 @@ const articleData = await page.evaluate(() => {
     if (mainImage) break;
   }
   
-  // ✅ Optimiser l'URL de l'image si nécessaire
+  // Optimiser l'URL de l'image si nécessaire
   let finalImageUrl = null;
   if (mainImage) {
     finalImageUrl = mainImage.src;
     
-    // Remplacer _news.jpg par _full.jpg pour avoir la meilleure qualité
+    // Remplacer _news.jpg par _full.jpg
     if (finalImageUrl.includes('_news.jpg')) {
       finalImageUrl = finalImageUrl.replace('_news.jpg', '_full.jpg');
     }
     
-    // Forcer HTTPS au lieu de HTTP
+    // Forcer HTTPS
     if (finalImageUrl.startsWith('http://')) {
       finalImageUrl = finalImageUrl.replace('http://', 'https://');
     }
