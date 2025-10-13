@@ -291,11 +291,13 @@ const articleData = await page.evaluate(() => {
   
   // Essayer différents sélecteurs dans l'ordre de priorité
   const imageSelectors = [
-    'img.newsFullImg[src*="bourgogne-infos.com"]',  // ✅ IMAGE PRINCIPALE !
-    '.newsFullContent img[src*="bourgogne-infos.com"]',  // ✅ Dans le conteneur de l'article
-    'img.newsFullImg',  // ✅ Backup
-    '.newsFullContent img',
-    'article img.shrinkToFit[src*="bourgogne-infos.com"]',
+    '.contentClassicNews img.newsFullImg[src*="bourgogne-infos.com"]',  // ✅ Seulement dans l'article principal
+    '.newsFullContent img.newsFullImg[src*="bourgogne-infos.com"]',     // ✅ Dans le contenu de l'article
+    '.contentClassicNews img.newsFullImg',                               // ✅ Backup sans filtre bourgogne-infos
+    '.newsFullContent img.newsFullImg',
+    '.contentClassicNews img[src*="bourgogne-infos.com"]',              // ✅ N'importe quelle image dans l'article
+    '.newsFullContent img[src*="bourgogne-infos.com"]',
+    'article img.newsFullImg[src*="bourgogne-infos.com"]',
     'article img[src*="bourgogne-infos.com"][src*="_full"]',
     'article img[src*="bourgogne-infos.com"]',
     'article img[src*="creusot-infos.com"]',
