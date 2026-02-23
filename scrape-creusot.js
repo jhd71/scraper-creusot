@@ -24,9 +24,6 @@ async function scrapeCreusotInfos() {
       timeout: 30000
     });
 
-    // Prendre une capture d'écran complète pour voir ce que voit le navigateur
-    await page.screenshot({ path: 'debug-main-page.png', fullPage: true });
-    
     // Extraction des articles directement depuis la page principale des faits divers
     const articles = await page.evaluate(() => {
       // Fonction pour extraire l'URL d'image d'un élément
@@ -248,11 +245,6 @@ for (let i = 0; i < selectedArticles.length; i++) {
       waitUntil: 'networkidle2', 
       timeout: 20000 
     });
-        
-        // Capture d'écran pour le premier article
-        if (i === 0) {
-          await page.screenshot({ path: 'debug-article-page.png', fullPage: false });
-        }
         
          // Extraction des informations détaillées de l'article
 const articleData = await page.evaluate(() => {

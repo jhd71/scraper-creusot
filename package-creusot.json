@@ -1,0 +1,12 @@
+{
+  "name": "scraper-creusot",
+  "version": "1.0.0",
+  "main": "scrape-creusot.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node scrape-creusot.js"
+  },
+  "dependencies": {
+    "puppeteer": "^24.15.0"
+  }
+}
