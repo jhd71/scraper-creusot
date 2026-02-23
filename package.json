@@ -7,7 +7,6 @@
     "start": "node scrape-creusot.js"
   },
   "dependencies": {
-    "fs-extra": "^11.1.1",
-    "puppeteer": "^22.8.2"
+    "puppeteer": "^23.11.0"
   }
 }
